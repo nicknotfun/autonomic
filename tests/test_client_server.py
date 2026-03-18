@@ -66,7 +66,7 @@ def test_guid_zones_xml_and_status(tmp_path: Path):
         client.select_zone(guid=zones_resp.zones[0].zoneGuid)
         client.select_source(guid=sources_resp.sources[1].sourceGuid)
         client.volume(47)
-        client.media_control("Play")
+        client.play()
 
         status = client.get_status()
         assert str(status.ZoneGuid) == str(zones_resp.zones[0].zoneGuid)

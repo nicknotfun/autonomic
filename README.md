@@ -1,4 +1,5 @@
 # Virtual Autonomic MA6
+
 This project provides a virtual MA6-like device and client that use command names from:
 
 - Autonomic Media Server Control Protocol (AMSCP)
@@ -45,8 +46,7 @@ Client initialization sends:
 - `SetSource Id=<id>` / `SetSource Guid=<guid>` / `SetSource Name=<name>`
 
 ### Playback / control
-- `MediaControl <action>` where action includes `Play`, `Pause`, `Stop`, `Next`, `Previous`, `SkipNext`, `SkipPrevious`, `Back`
-- Direct forms of the same actions are accepted as aliases
+- Direct playback commands: `Play`, `Pause`, `Stop`, `Next`, `Previous`, `SkipNext`, `SkipPrevious`, `Back`
 - `Volume <vol>`
 - `VolumeUp`
 - `VolumeDown`
@@ -70,7 +70,7 @@ sources = client.list_sources().sources
 client.select_zone(guid=zones[0].zoneGuid)
 client.select_source(guid=sources[0].sourceGuid)
 client.volume(45)
-client.media_control("Play")
+client.play()
 
 print(client.get_status().model_dump())
 ```

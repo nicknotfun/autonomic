@@ -161,11 +161,6 @@ def _handle_common(store: StateStore, command: str, session: dict[str, Any]) -> 
         store.set_zone(zone, **_apply_playback(cmd))
         return _kv_ok()
 
-    if cmd == "MediaControl":
-        if not args:
-            raise ProtocolError("MediaControl requires action")
-        return _handle_common(store, args[0] + (" " + " ".join(args[1:]) if len(args) > 1 else ""), session)
-
     if cmd in {"GetStatus", "MRAD.GetStatus"}:
         zone_guid = session.get("active_zone_guid")
         zone = store.get_zone(zone_guid=zone_guid) if zone_guid else next(iter(store.state.zones.values()))

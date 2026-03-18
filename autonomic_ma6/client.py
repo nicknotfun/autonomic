@@ -165,8 +165,29 @@ class MA6Client:
         arg = state if isinstance(state, str) else ("true" if state else "false")
         self._send_zone_scoped(f"Mute {arg}")
 
-    def media_control(self, action: str) -> None:
-        self._send_zone_scoped(f"MediaControl {action}")
+    def play(self) -> None:
+        self._send_zone_scoped("Play")
+
+    def pause(self) -> None:
+        self._send_zone_scoped("Pause")
+
+    def stop(self) -> None:
+        self._send_zone_scoped("Stop")
+
+    def next_track(self) -> None:
+        self._send_zone_scoped("Next")
+
+    def previous_track(self) -> None:
+        self._send_zone_scoped("Previous")
+
+    def skip_next(self) -> None:
+        self._send_zone_scoped("SkipNext")
+
+    def skip_previous(self) -> None:
+        self._send_zone_scoped("SkipPrevious")
+
+    def back(self) -> None:
+        self._send_zone_scoped("Back")
 
     def get_status(self) -> StatusResponse:
         xml = self._send_zone_scoped("GetStatus")
