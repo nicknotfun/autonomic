@@ -1,4 +1,4 @@
-# Virtual Autonomic MA6 (Spec-aligned command subset)
+# Virtual Autonomic MA6
 
 This project provides a virtual MA6-like device and client that use command names from:
 
@@ -6,16 +6,6 @@ This project provides a virtual MA6-like device and client that use command name
 - MRAD Communications on MAS
 
 It focuses on playback, zones, sources, and current state (no music library deep browse actions beyond zone/source listing).
-
-## What was corrected
-
-- Switched all internal/client response models to Pydantic (`extra="allow"`) for unknown-field resilience.
-- Introduced `Guid = NewType("Guid", str)` and use it across zone/source/status model fields.
-
-- Removed invented command grammar from the first draft.
-- Uses command forms from the supplied specs (e.g. `SetClientType`, `SetXmlMode Lists`, `BrowseAllZones`, `SetZone Guid=...`, direct playback commands like `Play`, and `GetStatus` / `MRAD.GetStatus`).
-- XML list/status responses are supported.
-- Zone identities are GUID-based.
 
 ## Default ports
 
@@ -57,7 +47,6 @@ Client initialization sends:
 
 ### Playback / control
 - Direct playback commands: `Play`, `Pause`, `Stop`, `Next`, `Previous`, `SkipNext`, `SkipPrevious`, `Back`
-- `MediaControl` is not used for issuing playback actions in this implementation
 - `Volume <vol>`
 - `VolumeUp`
 - `VolumeDown`

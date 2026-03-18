@@ -161,9 +161,6 @@ def _handle_common(store: StateStore, command: str, session: dict[str, Any]) -> 
         store.set_zone(zone, **_apply_playback(cmd))
         return _kv_ok()
 
-    if cmd == "MediaControl":
-        raise ProtocolError("MediaControl is event-oriented; use direct commands like Play, Pause, Stop, Next, or Previous")
-
     if cmd in {"GetStatus", "MRAD.GetStatus"}:
         zone_guid = session.get("active_zone_guid")
         zone = store.get_zone(zone_guid=zone_guid) if zone_guid else next(iter(store.state.zones.values()))
