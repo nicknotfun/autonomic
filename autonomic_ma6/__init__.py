@@ -1,14 +1,5 @@
-"""Virtual Autonomic MA6 device + client package."""
+from __future__ import annotations
 
-from .client import MA6Client
-from .models import Guid, SourcesListResponse, StatusResponse, ZonesListResponse
-from .server import VirtualMA6Device
+from autonomic import MA6Client, MirageAudioSystem, MirageMediaServer
 
-__all__ = [
-    "MA6Client",
-    "VirtualMA6Device",
-    "Guid",
-    "ZonesListResponse",
-    "SourcesListResponse",
-    "StatusResponse",
-]
+__all__ = ["MA6Client", "MirageAudioSystem", "MirageMediaServer"]
