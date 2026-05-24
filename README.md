@@ -629,8 +629,9 @@ Direct amplifier control is a compact ASCII hex protocol over TCP.
 
 - Encoding: ASCII.
 - Command terminator: CRLF, `\r\n`.
-- Command format: `<command-byte><output-byte><data-byte>\r\n`.
+- Basic command format: `<command-byte><output-byte><data-byte>\r\n`.
 - Bytes are transmitted as two uppercase hexadecimal characters.
+- Some commands return or accept more than one data byte.
 - Some diagnostic commands use fixed strings outside the three-byte pattern.
 
 Example:
@@ -644,6 +645,39 @@ This means:
 - `04`: volume command.
 - `0A`: output address 10.
 - `40`: volume value 64 decimal.
+
+### Polling and Batched Commands
+
+The direct amplifier endpoint accepts one or more CRLF-terminated hex commands
+in a single request. The SDK exposes this as `send_commands()` and `poll()`.
+
+TCP polling uses port `17037`:
+
+```python
+from autonomic import MirageAmplifier
+
+amp = MirageAmplifier("192.168.1.60", transport="tcp")
+rows = amp.poll(["0101", "0201", "0301", "0401"])
+```
+
+Some systems expose the same polling shape over HTTP at `/poll.cgi`:
+
+```python
+amp = MirageAmplifier("192.168.1.60", port=80, transport="http")
+rows = amp.poll(["0101", "0201", "0301", "0401"])
+```
+
+`poll()` returns `AmplifierResponse` objects:
+
+- `command`: integer command byte.
+- `output`: decoded output number, or `None` for invalid/reserved addresses.
+- `raw_output`: raw output byte as an integer.
+- `data`: list of integer data bytes.
+- `raw`: raw hex response line after whitespace normalization.
+
+The response parser is intentionally broad: it ignores blank lines, ignores
+non-hex noise, strips trailing whitespace, accepts multi-byte data payloads,
+and tolerates devices that return additional rows beyond the commands sent.
 
 ### Output Addressing
 
@@ -706,6 +740,18 @@ The data byte maps source numbers to protocol source values:
 | S6 | `01` |
 | S7 | `02` |
 | S8 | `04` |
+
+Some matrix-style integrations identify these same physical inputs with
+zero-based source IDs. In that form, source `0` is the first analog input and
+is encoded as data byte `05`. Construct the client with `source_base=0` when
+using those IDs:
+
+```python
+amp = MirageAmplifier("192.168.1.60", source_base=0)
+amp.assign_source_to_output(source=0, output=1)   # first analog input
+amp.assign_source_to_output(source=7, output=1)   # eighth local input
+amp.assign_source_to_output(source=33, output=1)  # extended matrix source
+```
 
 Examples:
 
@@ -850,6 +896,14 @@ diag.factory_reset(confirm=True, device_id="00D4")
 - `items`: list of `BrowseItem`.
 - `raw`: raw response text.
 - `total`, `start`, `more`: convenience accessors.
+
+`AmplifierResponse`:
+
+- `command`: direct amplifier command byte.
+- `output`: decoded output number.
+- `raw_output`: raw output byte.
+- `data`: response payload bytes.
+- `raw`: normalized raw response line.
 
 `BrowseItem`:
 

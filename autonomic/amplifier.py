@@ -2,16 +2,37 @@ from __future__ import annotations
 
 import re
 import socket
+import time
+import urllib.parse
+import urllib.request
+import uuid
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 
 from .exceptions import ProtocolError
 from .models import BrowseItem, BrowseResponse
 from .protocol import CRLF
 
 AMPLIFIER_DIAGNOSTIC_PORT = 17037
+AMPLIFIER_HTTP_PORT = 80
 DEVICE_ID_COMMAND = "2FFF"
 ALL_OUTPUTS = "FF"
 _DEVICE_ID_RE = re.compile(r"AFFF(?P<id>[0-9A-Fa-f]{4})")
+_DECODE_MATRIX_SOURCE = {
+    0: 4,
+    1: 5,
+    2: 6,
+    3: 3,
+    4: 7,
+    5: 0,
+    6: 1,
+    7: 2,
+    8: 8,
+    9: 9,
+    10: 10,
+    11: 11,
+}
+_ENCODE_MATRIX_SOURCE = {value: key for key, value in _DECODE_MATRIX_SOURCE.items()}
 _SOURCE_TO_DATA = {
     1: "05",
     2: "06",
@@ -22,6 +43,15 @@ _SOURCE_TO_DATA = {
     7: "02",
     8: "04",
 }
+
+
+@dataclass(frozen=True)
+class AmplifierResponse:
+    command: int
+    output: int | None
+    raw_output: int
+    data: list[int]
+    raw: str
 
 
 class MirageAmplifierDiagnostics:
@@ -96,23 +126,149 @@ class MirageAmplifier(MirageAmplifierDiagnostics):
         timeout: float = 3.0,
         output_count: int = 8,
         source_count: int = 8,
+        transport: str = "tcp",
+        http_path: str = "/poll.cgi",
+        source_base: int = 1,
     ):
         super().__init__(host, port, timeout=timeout)
         self.output_count = output_count
         self.source_count = source_count
+        self.transport = transport.lower()
+        self.http_path = http_path if http_path.startswith("/") else f"/{http_path}"
+        self.source_base = source_base
 
     @staticmethod
-    def build_data_command(command: int | str, output: int | str, data: int | str = 0) -> str:
-        return f"{_byte(command)}{_output_address(output)}{_byte(data)}"
+    def build_data_command(command: int | str, output: int | str, data: int | str | Iterable[int | str] = 0) -> str:
+        return f"{_byte(command)}{_output_address(output)}{_data_bytes(data)}"
 
     @staticmethod
     def source_data(source: int) -> str:
+        """Return the one-based Mirage protocol source byte for sources S1-S8."""
+
         try:
             return _SOURCE_TO_DATA[int(source)]
-        except (KeyError, ValueError) as exc:
+        except ValueError as exc:
+            raise ValueError("source must be an integer") from exc
+        except KeyError as exc:
             raise ValueError("source must be an integer from 1 through 8") from exc
 
-    def send_data_command(self, command: int | str, output: int | str, data: int | str = 0) -> str:
+    @staticmethod
+    def encode_matrix_source(source: int) -> str:
+        return _byte(_ENCODE_MATRIX_SOURCE.get(int(source), int(source)))
+
+    @staticmethod
+    def decode_matrix_source(source_data: int | str) -> int:
+        return _DECODE_MATRIX_SOURCE.get(int(source_data), int(source_data))
+
+    @staticmethod
+    def encode_output(output: int | str) -> str:
+        return _output_address(output)
+
+    @staticmethod
+    def decode_output(output_data: int | str) -> int | None:
+        return decode_output_address(int(output_data))
+
+    @staticmethod
+    def parse_response(text: str) -> list[AmplifierResponse]:
+        rows: list[AmplifierResponse] = []
+        for raw in text.splitlines():
+            line = raw.strip()
+            if len(line) < 4 or len(line) % 2:
+                continue
+            try:
+                command = int(line[0:2], 16)
+                raw_output = int(line[2:4], 16)
+                output = decode_output_address(raw_output)
+                data = [int(line[index : index + 2], 16) for index in range(4, len(line), 2)]
+            except ValueError:
+                continue
+            rows.append(
+                AmplifierResponse(
+                    command=command,
+                    output=output,
+                    raw_output=raw_output,
+                    data=data,
+                    raw=line,
+                )
+            )
+        return rows
+
+    @staticmethod
+    def expected_response_keys(commands: Iterable[str]) -> set[tuple[int, int | None]]:
+        keys: set[tuple[int, int | None]] = set()
+        for command in commands:
+            line = command.upper().rstrip("\r\n")
+            if len(line) < 4:
+                continue
+            try:
+                keys.add((int(line[0:2], 16), decode_output_address(int(line[2:4], 16))))
+            except ValueError:
+                continue
+        return keys
+
+    def send_ascii(self, command: str) -> str:
+        return self.send_commands([command]).strip()
+
+    def send_commands(self, commands: Iterable[str], *, timeout: float | None = None) -> str:
+        normalized = [command.upper().rstrip("\r\n") for command in commands]
+        if not normalized:
+            return ""
+        timeout = self.timeout if timeout is None else timeout
+        if self.transport == "http":
+            return self._send_http_commands(normalized, timeout=timeout)
+        if self.transport == "tcp":
+            return self._send_tcp_commands(normalized, timeout=timeout)
+        raise ValueError("transport must be 'tcp' or 'http'")
+
+    def poll(self, commands: str | Iterable[str], *, timeout: float | None = None) -> list[AmplifierResponse]:
+        if isinstance(commands, str):
+            commands = [commands]
+        return self.parse_response(self.send_commands(commands, timeout=timeout))
+
+    def _send_tcp_commands(self, commands: list[str], *, timeout: float) -> str:
+        body = "".join(f"{command}{CRLF}" for command in commands).encode("ascii")
+        chunks: list[bytes] = []
+        expected_keys = self.expected_response_keys(commands)
+        with socket.create_connection((self.host, self.port), timeout=timeout) as sock:
+            sock.sendall(body)
+            sock.settimeout(min(0.75, timeout))
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if expected_keys:
+                    text = b"".join(chunks).decode("ascii", errors="ignore")
+                    seen = {(row.command, row.output) for row in self.parse_response(text)}
+                    if expected_keys.issubset(seen):
+                        break
+                elif b"\n" in chunk:
+                    break
+        return b"".join(chunks).decode("ascii", errors="replace")
+
+    def _send_http_commands(self, commands: list[str], *, timeout: float) -> str:
+        body = "".join(f"{command}{CRLF}" for command in commands).encode("ascii")
+        query = urllib.parse.urlencode({"id": f"python-sdk-{uuid.uuid4()}"})
+        netloc = f"{self.host}:{self.port}" if self.port != AMPLIFIER_HTTP_PORT else self.host
+        request = urllib.request.Request(
+            f"http://{netloc}{self.http_path}?{query}",
+            data=body,
+            headers={"Content-Type": "application/x-poll"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("ascii", errors="replace")
+
+    def _source_data_for_instance(self, source: int) -> str:
+        if self.source_base == 0:
+            return self.encode_matrix_source(source)
+        return self.source_data(source)
+
+    def send_data_command(self, command: int | str, output: int | str, data: int | str | Iterable[int | str] = 0) -> str:
         return self.send_ascii(self.build_data_command(command, output, data))
 
     def list_outputs(self) -> BrowseResponse:
@@ -135,16 +291,17 @@ class MirageAmplifier(MirageAmplifierDiagnostics):
         )
 
     def list_sources(self) -> BrowseResponse:
+        first_source = 0 if self.source_base == 0 else 1
         items = [
             BrowseItem(
                 kind="Source",
                 attributes={
                     "id": str(index),
-                    "name": f"S{index}",
-                    "address": self.source_data(index),
+                    "name": f"S{index + 1 if self.source_base == 0 else index}",
+                    "address": self._source_data_for_instance(index),
                 },
             )
-            for index in range(1, self.source_count + 1)
+            for index in range(first_source, first_source + self.source_count)
         ]
         return BrowseResponse(
             kind="Sources",
@@ -215,7 +372,7 @@ class MirageAmplifier(MirageAmplifierDiagnostics):
         return self.send_data_command("12", output, "00")
 
     def assign_source_to_output(self, source: int, output: int | str) -> str:
-        return self.send_data_command("03", output, self.source_data(source))
+        return self.send_data_command("03", output, self._source_data_for_instance(source))
 
     def assign_source_to_outputs(self, source: int, outputs: Iterable[int | str]) -> list[str]:
         return [self.assign_source_to_output(source, output) for output in outputs]
@@ -242,7 +399,49 @@ def _byte(value: int | str) -> str:
     return normalized.zfill(2)
 
 
+def _data_bytes(data: int | str | Iterable[int | str]) -> str:
+    if isinstance(data, str):
+        normalized = data.upper()
+        if re.fullmatch(r"[0-9A-F]+", normalized) and len(normalized) % 2 == 0:
+            return normalized
+        return _byte(normalized)
+    if isinstance(data, int):
+        return _byte(data)
+    return "".join(_byte(value) for value in data)
+
+
+def encode_output_address(output: int | str) -> int:
+    if isinstance(output, str) and output.lower() == "all":
+        return 0xFF
+    value = int(output)
+    if value == 0xFF:
+        return value
+    if value >= 64:
+        return 192 + (value - 64)
+    if value >= 32:
+        return 128 + (value - 32)
+    return value
+
+
+def decode_output_address(output: int) -> int | None:
+    value = int(output)
+    if value == 0xFF:
+        return value
+    value = value & ~32
+    if (value & 192) == 128:
+        return 32 + (value & 31)
+    if (value & 192) == 192:
+        return 64 + (value & 31)
+    if (value & 192) == 64:
+        return None
+    if value == 0:
+        return 96
+    return value
+
+
 def _output_address(output: int | str) -> str:
     if isinstance(output, str) and output.lower() == "all":
         return ALL_OUTPUTS
+    if isinstance(output, int):
+        return _byte(encode_output_address(output))
     return _byte(output)

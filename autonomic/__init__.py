@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from .amplifier import AMPLIFIER_DIAGNOSTIC_PORT, ALL_OUTPUTS, MirageAmplifier, MirageAmplifierDiagnostics
+from .amplifier import (
+    AMPLIFIER_DIAGNOSTIC_PORT,
+    ALL_OUTPUTS,
+    AmplifierResponse,
+    MirageAmplifier,
+    MirageAmplifierDiagnostics,
+    decode_output_address,
+    encode_output_address,
+)
 from .connection import LineConnection
 from .exceptions import (
     AutonomicError,
@@ -19,6 +27,7 @@ from .protocol import album_art_url, format_assignment, format_command, parse_ev
 __all__ = [
     "AMPLIFIER_DIAGNOSTIC_PORT",
     "ALL_OUTPUTS",
+    "AmplifierResponse",
     "AutonomicError",
     "AutonomicTimeoutError",
     "BrowseItem",
@@ -39,6 +48,8 @@ __all__ = [
     "ProtocolError",
     "StatusSnapshot",
     "album_art_url",
+    "decode_output_address",
+    "encode_output_address",
     "format_assignment",
     "format_command",
     "parse_event",

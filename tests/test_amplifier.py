@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from autonomic import MirageAmplifier, MirageAmplifierDiagnostics, ProtocolError
+from autonomic import MirageAmplifier, MirageAmplifierDiagnostics, ProtocolError, decode_output_address, encode_output_address
 
 
 class FakeMirageAmplifier(MirageAmplifier):
-    def __init__(self):
-        super().__init__("127.0.0.1")
+    def __init__(self, **kwargs):
+        super().__init__("127.0.0.1", **kwargs)
         self.sent: list[str] = []
 
     def send_ascii(self, command: str) -> str:
@@ -75,6 +75,23 @@ class MirageAmplifierDiagnosticsTests(unittest.TestCase):
             amp.set_output_volume(1, 0xA1)
         with self.assertRaises(ValueError):
             amp.assign_source_to_output(9, 1)
+
+    def test_http_poll_helpers_support_stagey_matrix_shape(self):
+        self.assertEqual(MirageAmplifier.build_data_command("04", 1, [0x20, 0x40]), "04012040")
+        self.assertEqual(encode_output_address(64), 192)
+        self.assertEqual(decode_output_address(192), 64)
+
+        rows = MirageAmplifier.parse_response("04012040   \n030184\nignored\n")
+        self.assertEqual(rows[0].command, 4)
+        self.assertEqual(rows[0].output, 1)
+        self.assertEqual(rows[0].data, [0x20, 0x40])
+        self.assertEqual(rows[1].data, [0x84])
+        self.assertEqual(MirageAmplifier.decode_matrix_source(rows[1].data[0] & 0x7F), 7)
+
+        amp = FakeMirageAmplifier(source_base=0)
+        amp.assign_source_to_output(7, 1)
+        amp.assign_source_to_output(33, 1)
+        self.assertEqual(amp.sent, ["030104", "030121"])
 
 
 if __name__ == "__main__":
