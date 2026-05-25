@@ -103,7 +103,7 @@ class MirageAmplifierDeviceInfoTests(unittest.TestCase):
             responses={
                 "01FF": "010101\n010200",
                 "02FF": "020101\n020200",
-                "03FF": "030102\n0302A2",
+                "03FF": "030102\n03028322",
                 "04FF": "04015064\n040240",
             },
         )

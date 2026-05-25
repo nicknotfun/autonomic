@@ -455,7 +455,10 @@ class MirageAmplifier:
                     update["muted"] = muted
                     attrs["Mute"] = "true" if muted else "false"
             elif row.command == 0x03:
-                source_data_value = row.data[0] & 0x7F
+                source_byte = row.data[0]
+                if len(row.data) > 1 and (row.data[-1] & 0x7F) >= 0x20:
+                    source_byte = row.data[-1]
+                source_data_value = source_byte & 0x7F
                 source_id_value = self._source_id_for_instance(source_data_value)
                 source_name = self._source_name_for_instance(source_id_value)
                 update["source_id"] = str(source_id_value)
