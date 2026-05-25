@@ -37,6 +37,21 @@ DIRECT_AMPLIFIER_SOURCE_NAMES: dict[str, str] = {
     "s7": "Alpha",
     "s8": "Beta",
 }
+DIRECT_AMPLIFIER_LOCAL_SOURCES: tuple[tuple[int, str, str], ...] = (
+    (7, "Alpha", "000027fb-f8a9-f6be-a465-3d0fbee12977"),
+    (8, "Beta", "000027fc-f8a9-f6be-a465-3d0fbee12977"),
+)
+DIRECT_AMPLIFIER_REMOTE_SOURCES: tuple[tuple[int, str, str], ...] = (
+    (34, "Passthrough", "000027dc-df88-bd41-abbd-079c4e743694"),
+    (33, "Gamma", "000027e2-df88-bd41-abbd-079c4e743694"),
+    (32, "Delta", "000027e3-df88-bd41-abbd-079c4e743694"),
+)
+DIRECT_AMPLIFIER_LOCAL_SOURCE_BY_SLOT: dict[str, tuple[str, str]] = {
+    f"s{slot_number}": (name, guid) for slot_number, name, guid in DIRECT_AMPLIFIER_LOCAL_SOURCES
+}
+DIRECT_AMPLIFIER_REMOTE_SOURCE_BY_ID: dict[str, tuple[str, str]] = {
+    str(source_id_value): (name, guid) for source_id_value, name, guid in DIRECT_AMPLIFIER_REMOTE_SOURCES
+}
 
 
 class AutonomicClient:
@@ -112,6 +127,9 @@ class AutonomicClient:
     def list_sources(self, *, include_disabled: bool = False) -> list[AutonomicSource]:
         if self._backend() == "mrad":
             sources = self.audio.list_sources(include_disabled=include_disabled)
+        elif self._backend() == "amplifier":
+            sources = self.amplifier.list_sources(include_disabled=include_disabled)
+            sources.extend(self._direct_remote_sources(existing_ids={source.id for source in sources}))
         else:
             sources = self.amplifier.list_sources(include_disabled=include_disabled)
         return [self._with_source_alias(source).bind(self) for source in sources]
@@ -294,10 +312,14 @@ class AutonomicClient:
 
     def _with_source_alias(self, source: AutonomicSource) -> AutonomicSource:
         if self._backend() == "amplifier":
-            alias = self._direct_source_alias(source.name, source.id)
-            if alias is not None:
-                return source.model_copy(update={"name": alias})
-            return source
+            definition = self._direct_source_definition(source.name, source.id)
+            if definition is None:
+                return source
+            name, guid = definition
+            attrs = dict(source.attributes)
+            attrs.setdefault("rawName", source.name or "")
+            attrs.update({"guid": guid, "name": name})
+            return source.model_copy(update={"name": name, "guid": guid, "attributes": attrs})
 
         alias = self._source_alias_for_guid(source.guid)
         if alias is None:
@@ -348,6 +370,10 @@ class AutonomicClient:
         return value
 
     def _direct_source_alias(self, source_name: str | None, source_id_value: str | None) -> str | None:
+        definition = self._direct_source_definition(source_name, source_id_value)
+        if definition is not None:
+            return definition[0]
+
         if source_name:
             alias = DIRECT_AMPLIFIER_SOURCE_NAMES.get(source_name.strip().lower())
             if alias is not None:
@@ -369,6 +395,42 @@ class AutonomicClient:
         if self.amplifier.source_base == 0:
             return f"S{numeric_id + 1}"
         return f"S{numeric_id}"
+
+    def _direct_source_definition(self, source_name: str | None, source_id_value: str | None) -> tuple[str, str] | None:
+        if source_id_value:
+            remote_definition = DIRECT_AMPLIFIER_REMOTE_SOURCE_BY_ID.get(str(source_id_value))
+            if remote_definition is not None:
+                return remote_definition
+
+        slot_name = source_name or self._direct_source_slot_name(source_id_value)
+        if slot_name:
+            local_definition = DIRECT_AMPLIFIER_LOCAL_SOURCE_BY_SLOT.get(slot_name.strip().lower())
+            if local_definition is not None:
+                return local_definition
+        return None
+
+    def _direct_remote_sources(self, *, existing_ids: set[str | None]) -> list[AutonomicSource]:
+        sources: list[AutonomicSource] = []
+        for source_id_value, name, guid in DIRECT_AMPLIFIER_REMOTE_SOURCES:
+            if str(source_id_value) in existing_ids:
+                continue
+            address = MirageAmplifier.encode_matrix_source(source_id_value)
+            sources.append(
+                AutonomicSource(
+                    id=str(source_id_value),
+                    guid=guid,
+                    name=name,
+                    address=address,
+                    attributes={
+                        "id": str(source_id_value),
+                        "guid": guid,
+                        "name": name,
+                        "address": address,
+                        "remoteSlot": f"{source_id_value - 0x20:02X}",
+                    },
+                )
+            )
+        return sources
 
     def _source_alias_for_guid(self, guid: str | None) -> str | None:
         if not guid:

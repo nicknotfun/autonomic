@@ -757,8 +757,20 @@ client = AutonomicClient(
 )
 ```
 
-When using `AutonomicClient` in direct amplifier mode, the raw direct slots are
-presented with the local house names:
+When using `AutonomicClient` in direct amplifier mode, all configured direct
+source slots remain visible. The known local and eAudioCast sources are
+identified with preferred names and GUIDs so they can be selected by name:
+
+| Direct source | Presented name | GUID |
+| --- | --- | --- |
+| `S7` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
+| `S8` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
+| Remote slot `02` / selector `0x22` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
+| Remote slot `01` / selector `0x21` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Remote slot `00` / selector `0x20` | Delta | `000027e3-df88-bd41-abbd-079c4e743694` |
+
+The lower-level `MirageAmplifier` client still exposes protocol slot names.
+Direct amplifier outputs are presented with the local house names:
 
 | Output | Presented name |
 | --- | --- |
@@ -774,9 +786,6 @@ presented with the local house names:
 | 10 | Patio West |
 | 11 | Patio East |
 | 12 | Pool |
-
-The raw direct source slots `S7` and `S8` are presented as `Alpha` and `Beta`.
-The lower-level `MirageAmplifier` client still exposes the protocol slot names.
 
 Examples:
 
