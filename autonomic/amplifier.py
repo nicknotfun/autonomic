@@ -259,10 +259,10 @@ class MirageAmplifier:
         return source + 1
 
     def _source_name_for_instance(self, source_id_value: int) -> str:
-        if self.source_base == 0:
-            return f"S{source_id_value + 1}"
         if source_id_value >= 0x20:
             return f"Remote {source_id_value - 0x20 + 1}"
+        if self.source_base == 0:
+            return f"S{source_id_value + 1}"
         return f"S{source_id_value}"
 
     def send_data_command(self, command: int | str, output: int | str, data: int | str | Iterable[int | str] = 0) -> str:
@@ -455,7 +455,10 @@ class MirageAmplifier:
                     update["muted"] = muted
                     attrs["Mute"] = "true" if muted else "false"
             elif row.command == 0x03:
-                source_data_value = row.data[0] & 0x7F
+                source_byte = row.data[0]
+                if len(row.data) > 1 and not (source_byte & 0x80) and (row.data[-1] & 0x7F) >= 0x20:
+                    source_byte = row.data[-1]
+                source_data_value = source_byte & 0x7F
                 source_id_value = self._source_id_for_instance(source_data_value)
                 source_name = self._source_name_for_instance(source_id_value)
                 update["source_id"] = str(source_id_value)
@@ -463,11 +466,13 @@ class MirageAmplifier:
                 attrs["sourceId"] = str(source_id_value)
                 attrs["sourceName"] = source_name
                 attrs["sourceAddress"] = _byte(source_data_value)
+                if len(row.data) > 1:
+                    attrs["sourceStatusData"] = "".join(_byte(value) for value in row.data)
                 if row.data[0] & 0x80:
                     update.setdefault("is_on", True)
                     attrs.setdefault("PowerOn", "true")
             elif row.command == 0x04:
-                raw_volume = row.data[-1]
+                raw_volume = row.data[0]
                 volume = _volume_from_raw(raw_volume)
                 update["volume"] = volume
                 attrs["Volume"] = str(volume)

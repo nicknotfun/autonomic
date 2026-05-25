@@ -9,6 +9,7 @@ from autonomic import (
     AutonomicOutput,
     AutonomicOutputGroup,
     AutonomicSource,
+    DEFAULT_HOST,
     MirageAmplifier,
     MirageAudioSystem,
 )
@@ -35,6 +36,15 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertFalse(hasattr(client, "enable_all_outputs"))
         self.assertFalse(hasattr(client, "disable_all_outputs"))
         self.assertFalse(client._initialized)
+
+    def test_unified_client_defaults_to_primary_direct_amp_host(self):
+        client = AutonomicClient(auto_initialize=False)
+
+        self.assertEqual(DEFAULT_HOST, "10.1.0.200")
+        self.assertEqual(client.host, "10.1.0.200")
+        self.assertEqual(client.media.host, "10.1.0.200")
+        self.assertEqual(client.audio.host, "10.1.0.200")
+        self.assertEqual(client.amplifier.host, "10.1.0.200")
 
     def test_constructor_auto_initializes_by_default(self):
         with patch.object(MirageAmplifier, "get_device_id", return_value="00D4") as get_device_id:
@@ -198,7 +208,13 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertFalse(hasattr(output, "enable"))
 
     def test_unified_client_supports_direct_amplifier_mode_with_objects(self):
-        client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False)
+        client = AutonomicClient(
+            "amp.local",
+            mode="amplifier",
+            auto_initialize=False,
+            amplifier_source_count=12,
+            amplifier_source_base=0,
+        )
         sent: list[str] = []
 
         def fake_send_commands(commands, *, timeout=None) -> str:
@@ -235,9 +251,38 @@ class AutonomicClientTests(unittest.TestCase):
         outputs = client.list_outputs()
         sources = client.list_sources()
         self.assertEqual(len(outputs), 8)
+        self.assertEqual(len(sources), 17)
         self.assertIsInstance(outputs[0], AutonomicOutput)
         self.assertIsInstance(sources[6], AutonomicSource)
+        self.assertEqual([output.name for output in outputs], [
+            "Kitchen",
+            "Dining",
+            "Living",
+            "Master",
+            "Bathroom",
+            "Foyer",
+            "Sitting",
+            "Passthrough",
+        ])
+        self.assertEqual(sources[6].name, "Alpha")
+        self.assertEqual(sources[7].name, "Beta")
+        self.assertEqual(sources[12].name, "Delta")
+        self.assertEqual(sources[13].name, "Gamma")
+        self.assertEqual(sources[14].name, "Passthrough")
+        self.assertEqual(sources[15].name, "Alpha")
+        self.assertEqual(sources[16].name, "Beta")
         self.assertEqual(sources[6].attributes["address"], "02")
+        self.assertEqual(sources[11].attributes["address"], "0B")
+        self.assertEqual(sources[14].attributes["address"], "22")
+        self.assertEqual(client.source_by_name("Alpha").id, "6")
+        self.assertEqual(client.source_by_name("Passthrough").id, "34")
+        self.assertEqual(client.source_by_name("Gamma").id, "33")
+        self.assertEqual(client.source_by_name("Delta").id, "32")
+        self.assertEqual(client.output_by_name("Kitchen").id, "1")
+
+        sent.clear()
+        client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
+        client.amplifier.send_ascii = fake_send  # type: ignore[method-assign]
 
         sent.clear()
         client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
@@ -253,6 +298,11 @@ class AutonomicClientTests(unittest.TestCase):
         outputs[1].assign(sources[7])
         client.assign_source_to_outputs(sources[6], outputs[:2])
         client.assign_matrix({outputs[0]: sources[6], outputs[1]: sources[7]})
+        client.assign_source_to_output("Alpha", "Kitchen")
+        client.set_output_volume("Patio West", 50)
+        client.set_output_mute("Patio West", False)
+        client.set_output_power("Patio West", True)
+        client.assign_source_to_output("Passthrough", "Patio West")
 
         self.assertEqual(
             sent,
@@ -268,11 +318,38 @@ class AutonomicClientTests(unittest.TestCase):
                 "030202",
                 "030102",
                 "030204",
+                "030102",
+                "040A50",
+                "020A01",
+                "010A01",
+                "030A22",
             ],
         )
 
         with self.assertRaises(AutonomicError):
             client.play()
+
+    def test_unified_client_applies_device_specific_direct_source_names(self):
+        client = AutonomicClient(
+            "amp.local",
+            mode="amplifier",
+            auto_initialize=False,
+            amplifier_source_count=12,
+            amplifier_source_base=0,
+        )
+        client._amplifier_device_id = "6012"
+
+        sources = client.list_sources()
+
+        self.assertEqual(sources[3].name, "Passthrough")
+        self.assertEqual(sources[3].guid, "000027dc-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(sources[6].name, "Gamma")
+        self.assertEqual(sources[6].guid, "000027e2-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(sources[7].name, "Delta")
+        self.assertEqual(sources[7].guid, "000027e3-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(client.source_by_name("Passthrough").id, "3")
+        self.assertEqual(client.source_by_name("Alpha").id, "35")
+        self.assertEqual(client.source_by_name("Beta").id, "36")
 
     def test_unified_client_reads_direct_amplifier_output_status(self):
         client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False, amplifier_output_count=2)
@@ -286,8 +363,8 @@ class AutonomicClientTests(unittest.TestCase):
             responses = {
                 "01FF": "010101\n010200",
                 "02FF": "020101\n020200",
-                "03FF": "030102\n030204",
-                "04FF": "040150\n040240",
+                "03FF": "030102\n0302A2",
+                "04FF": "04015064\n040240",
             }
             return "\n".join(responses.get(command, "") for command in normalized)
 
@@ -303,10 +380,11 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertEqual(
             [(output.is_on, output.muted, output.volume, output.source_name) for output in outputs],
             [
-                (True, False, 50, "S7"),
-                (False, True, 40, "S8"),
+                (True, False, 50, "Alpha"),
+                (False, True, 40, "Passthrough"),
             ],
         )
+        self.assertEqual([output.name for output in outputs], ["Kitchen", "Dining"])
 
 
 if __name__ == "__main__":
