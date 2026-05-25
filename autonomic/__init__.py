@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from .amplifier import AMPLIFIER_DIAGNOSTIC_PORT, ALL_OUTPUTS, MirageAmplifier, MirageAmplifierDiagnostics
+from .amplifier import (
+    AMPLIFIER_DIAGNOSTIC_PORT,
+    ALL_OUTPUTS,
+    AmplifierResponse,
+    MirageAmplifier,
+    decode_output_address,
+    encode_output_address,
+)
 from .connection import LineConnection
 from .exceptions import (
     AutonomicError,
@@ -10,28 +17,41 @@ from .exceptions import (
     NotConnectedError,
     ProtocolError,
 )
-from .ma6 import MA6Client
+from .client import DEFAULT_SOURCE_ALIASES, AutonomicClient
 from .mms import MMS_PORT, MirageMediaServer
-from .models import BrowseItem, BrowseResponse, CommandResponse, Event, StatusSnapshot
+from .models import (
+    AutonomicOutput,
+    AutonomicOutputGroup,
+    AutonomicSource,
+    BrowseItem,
+    BrowseResponse,
+    CommandResponse,
+    Event,
+    StatusSnapshot,
+)
 from .mrad import MRAD_PORT, MirageAudioSystem
 from .protocol import album_art_url, format_assignment, format_command, parse_event, parse_xml_list
 
 __all__ = [
     "AMPLIFIER_DIAGNOSTIC_PORT",
     "ALL_OUTPUTS",
+    "AmplifierResponse",
+    "AutonomicClient",
     "AutonomicError",
     "AutonomicTimeoutError",
+    "AutonomicOutput",
+    "AutonomicOutputGroup",
+    "AutonomicSource",
     "BrowseItem",
     "BrowseResponse",
     "CommandError",
     "CommandResponse",
     "ConnectionClosedError",
+    "DEFAULT_SOURCE_ALIASES",
     "Event",
     "LineConnection",
-    "MA6Client",
     "MMS_PORT",
     "MRAD_PORT",
-    "MirageAmplifierDiagnostics",
     "MirageAmplifier",
     "MirageAudioSystem",
     "MirageMediaServer",
@@ -39,6 +59,8 @@ __all__ = [
     "ProtocolError",
     "StatusSnapshot",
     "album_art_url",
+    "decode_output_address",
+    "encode_output_address",
     "format_assignment",
     "format_command",
     "parse_event",

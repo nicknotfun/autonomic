@@ -34,7 +34,7 @@ class ProtocolConnection(Protocol):
 EventCallback = Callable[[Event], None]
 
 
-class AutonomicClient:
+class ProtocolClient:
     """Base synchronous command client for Autonomic line-protocol sockets."""
 
     def __init__(
@@ -42,7 +42,7 @@ class AutonomicClient:
         host: str,
         port: int,
         *,
-        timeout: float = 3.0,
+        timeout: float = 5.0,
         connection: ProtocolConnection | None = None,
         on_event: EventCallback | None = None,
     ):
@@ -150,7 +150,7 @@ class AutonomicClient:
             if self.on_event:
                 self.on_event(event)
 
-    def __enter__(self) -> "AutonomicClient":
+    def __enter__(self) -> "ProtocolClient":
         self.connect()
         return self
 
@@ -161,7 +161,6 @@ class AutonomicClient:
         traceback: TracebackType | None,
     ) -> None:
         self.close()
-
 
 def _parse_payload(lines: list[str]):
     if not lines:

@@ -1,15 +1,29 @@
 # Autonomic Python SDK
 
-Dependency-free Python SDK and protocol notes for Autonomic Mirage Media Server,
-Mirage Audio System/MRAD, MA6-style systems, and direct Mirage amplifier control
-such as standalone M-6250 devices.
+Python SDK and protocol notes for Autonomic Mirage Media Server, Mirage Audio
+System/MRAD systems, and direct Mirage amplifier control such as standalone
+M-6250 devices.
 
 This README is intentionally self-contained. It documents the protocol behavior
 implemented by this library and observed against real devices.
 
-## Supported Device Paths
+## Client Layers
 
-The SDK supports two main control paths.
+The SDK exposes three low-level clients and one unified high-level client.
+
+Low-level clients:
+
+- `MirageMediaServer`: raw MMS/media-server protocol on TCP port `5004`.
+- `MirageAudioSystem`: raw MRAD/MAS output, source, group, and zone protocol on
+  TCP port `5006`.
+- `MirageAmplifier`: raw direct amplifier protocol on TCP port `17037`.
+
+High-level client:
+
+- `AutonomicClient`: one object that auto-detects MRAD/MAS or direct amplifier
+  mode and exposes object-first output/source helpers.
+
+The SDK supports two main output-control paths.
 
 `mrad` mode:
 
@@ -23,9 +37,9 @@ The SDK supports two main control paths.
 - Direct amplifier control over TCP port `17037`.
 - Used by standalone matrix amplifiers where `5004` and `5006` are not open.
 - The SDK exposes synthetic output/source browse lists and sends direct hex
-  amplifier commands for source routing, volume, mute, and output enable.
+  amplifier commands for source routing, volume, and mute.
 
-`MA6Client` auto-detects the backend:
+`AutonomicClient` auto-detects the backend:
 
 - If port `5006` is open, it uses MRAD/MAS mode.
 - Otherwise, if port `17037` is open, it uses direct amplifier mode.
@@ -38,7 +52,7 @@ The SDK supports two main control paths.
 python -m pip install -e .
 ```
 
-The library has no runtime dependencies.
+The runtime dependency is Pydantic, used for typed output/source models.
 
 ## Protocol Fundamentals
 
@@ -368,7 +382,9 @@ MRAD controls sources, zones, output volume, mute, power, party mode, and zone
 groups. The protocol calls physical amplifier outputs "zones". The SDK exposes
 both names:
 
-- `browse_all_zones()` and `list_outputs()` are equivalent.
+- `browse_all_zones()` returns the raw browse response.
+- `list_outputs()` returns typed `AutonomicOutput` objects, omitting disabled
+  outputs by default.
 - `set_zone()` and `set_output()` are equivalent.
 
 ### Connection Banner
@@ -426,11 +442,11 @@ BrowseZoneGroups
 BrowseZoneGroups <start> <count>
 BrowseZoneGroup <optional-zone-or-group>
 BrowseZonesForGroup <group-guid>
-BrowsePartyModeInclude
 ```
 
 `BrowseSources` returns sources available to the active zone. `BrowseAllSources`
-returns all sources available to any zone.
+returns all sources available to any zone. `list_sources()` uses the all-sources
+browse response, then omits disabled/unavailable sources by default.
 
 ### MRAD Status
 
@@ -497,14 +513,24 @@ Python:
 with MirageAudioSystem("192.168.1.50") as mas:
     outputs = mas.list_outputs()
     sources = mas.list_sources()
-    mas.assign_source_to_output(sources.items[0].guid, outputs.items[0].id)
+    mas.assign_source_to_output(sources[0], outputs[0])
+    mas.assign_source_to_all_outputs(sources[0])
     mas.assign_output_sources({
-        outputs.items[0].id: sources.items[0].guid,
-        outputs.items[1].id: sources.items[1].guid,
+        outputs[0]: sources[0],
+        outputs[1]: sources[1],
     })
 ```
 
-### MRAD Output Volume, Mute, and Power
+Use `include_disabled=True` when an integration needs to inspect disabled
+source/output metadata without controlling those items:
+
+```python
+all_outputs = mas.list_outputs(include_disabled=True)
+all_sources = mas.list_sources(include_disabled=True)
+disabled_sources = [source for source in all_sources if source.disabled]
+```
+
+### MRAD Output Power, Volume, and Mute
 
 Active output:
 
@@ -515,9 +541,6 @@ VolumeDown
 Mute true
 Mute false
 Mute toggle
-Power On
-Power Off
-Power Toggle
 ```
 
 Specified output:
@@ -531,7 +554,6 @@ Mute false <zone-id-or-guid-or-name>
 Mute toggle <zone-id-or-guid-or-name>
 Power On <zone-id-or-guid-or-name>
 Power Off <zone-id-or-guid-or-name>
-Power Toggle <zone-id-or-guid-or-name>
 ```
 
 All outputs:
@@ -540,7 +562,6 @@ All outputs:
 MuteAll On
 MuteAll Off
 MuteAll Toggle
-AllOff
 ```
 
 Python:
@@ -548,65 +569,36 @@ Python:
 ```python
 mas.set_output_volume("Zone_1", 60)
 mas.set_output_mute("Zone_1", False)
-mas.enable_output("Zone_1")
-mas.disable_output("Zone_1")
+mas.set_output_is_on("Zone_1", True)
 mas.mute_all_outputs(True)
-mas.disable_all_outputs()
 ```
+
+`set_output_power()` and `set_output_is_on()` set the runtime `PowerOn` /
+`is_on` state for a zone. They are not enablement/configuration helpers and are
+only available for MRAD/MAS mode.
+
+For MRAD/MAS output-targeted controls, the SDK powers the zone on before
+source assignment, volume changes, and targeted mute/unmute commands. If the
+device still returns a zone-is-off error, the SDK sends `Power On` and retries
+the original command once. Direct amplifier mode does not map this behavior to
+standby.
 
 ### MRAD Zone Groups
 
-Build a new zone group:
+The SDK parses zone-group browse responses so callers can inspect membership.
+It does not provide helpers that modify zone groups or party-mode membership.
+
+### MRAD Read-Only Utility Commands
+
+The high-level SDK intentionally omits configuration-plane helpers such as
+enable/disable, renaming, icon changes, party mode, and zone-group mutation.
+Low-level `command()` remains available for protocol exploration; the
+documented control surface is source routing, runtime zone power, mute, and
+volume.
+
+Useful read-only commands:
 
 ```text
-SetZoneGroup <first-zone-guid> <member-zone-guid-1,member-zone-guid-2> <source-guid>
-```
-
-Modify an existing zone group:
-
-```text
-SetZoneGroup <zone-group-guid> <member-zone-guid-1,member-zone-guid-2>
-```
-
-Other useful grouping commands:
-
-```text
-SetSourceForGroup <source-id-or-guid-or-name>
-SetZoneGroupTimer <minutes> <zone-or-group>
-SetPartyModeInclude True <zone-or-group>
-SetPartyModeInclude False <zone-or-group>
-PartyMode On
-PartyMode Off
-PartyMode Toggle
-PartyMode Toggle <zone-id-or-guid-or-name>
-```
-
-### MRAD Tone and Other Output Controls
-
-The SDK leaves these available through `command()`:
-
-```text
-Bass <value> <optional-zone>
-BassUp <optional-zone>
-BassDown <optional-zone>
-Treble <value> <optional-zone>
-TrebleUp <optional-zone>
-TrebleDown <optional-zone>
-Balance <value> <optional-zone>
-BalanceLeft <optional-zone>
-BalanceRight <optional-zone>
-Loudness <true|false|toggle> <optional-zone>
-MonoDownmix <true|false|toggle> <optional-zone>
-MaxVolume <value> <optional-zone>
-PowerOnVolume <value> <optional-zone>
-ZoneGain <value> <optional-zone>
-ZoneGainUp <optional-zone>
-ZoneGainDown <optional-zone>
-ZoneName <name> <optional-zone>
-ZoneIcon <icon> <optional-zone>
-SourceName <name> <optional-source>
-SourceIcon <icon> <optional-source>
-IdentifyZone <zone>
 GetMute <optional-zone>
 GetVolume <optional-zone>
 GetVersions
@@ -617,8 +609,8 @@ Ping
 Example:
 
 ```python
-mas.command("Bass", 2, "Zone_1")
-mas.command("Loudness", "Toggle", "Zone_1")
+mas.command("GetVolume", "Zone_1")
+mas.command("GetVersions")
 ```
 
 ## Direct Amplifier Protocol: Port 17037
@@ -629,8 +621,9 @@ Direct amplifier control is a compact ASCII hex protocol over TCP.
 
 - Encoding: ASCII.
 - Command terminator: CRLF, `\r\n`.
-- Command format: `<command-byte><output-byte><data-byte>\r\n`.
+- Basic command format: `<command-byte><output-byte><data-byte>\r\n`.
 - Bytes are transmitted as two uppercase hexadecimal characters.
+- Some commands return or accept more than one data byte.
 - Some diagnostic commands use fixed strings outside the three-byte pattern.
 
 Example:
@@ -644,6 +637,39 @@ This means:
 - `04`: volume command.
 - `0A`: output address 10.
 - `40`: volume value 64 decimal.
+
+### Polling and Batched Commands
+
+The direct amplifier endpoint accepts one or more CRLF-terminated hex commands
+in a single request. The SDK exposes this as `send_commands()` and `poll()`.
+
+TCP polling uses port `17037`:
+
+```python
+from autonomic import MirageAmplifier
+
+amp = MirageAmplifier("192.168.1.60", transport="tcp")
+rows = amp.poll(["0101", "0201", "0301", "0401"])
+```
+
+Some systems expose the same polling shape over HTTP at `/poll.cgi`:
+
+```python
+amp = MirageAmplifier("192.168.1.60", port=80, transport="http")
+rows = amp.poll(["0101", "0201", "0301", "0401"])
+```
+
+`poll()` returns `AmplifierResponse` objects:
+
+- `command`: integer command byte.
+- `output`: decoded output number, or `None` for invalid/reserved addresses.
+- `raw_output`: raw output byte as an integer.
+- `data`: list of integer data bytes.
+- `raw`: raw hex response line after whitespace normalization.
+
+The response parser is intentionally broad: it ignores blank lines, ignores
+non-hex noise, strips trailing whitespace, accepts multi-byte data payloads,
+and tolerates devices that return additional rows beyond the commands sent.
 
 ### Output Addressing
 
@@ -671,25 +697,18 @@ amp.set_output_mute("all", True)
 
 | Command | Name | Data |
 | --- | --- | --- |
-| `01` | Standby/output enable | `00` enable/output on, `01` standby/output off, `04` toggle |
 | `02` | Mute | `00` mute, `01` unmute, `02` toggle |
 | `03` | Source selection | Source data value from the source map below |
 | `04` | Volume | `00` through `A0` |
-| `05` | Bass | Signed range encoded as one byte |
-| `06` | Treble | Signed range encoded as one byte |
-| `07` | Balance | Signed range encoded as one byte |
 | `09` | Send all parameters | Usually `00` |
-| `0C` | Amplifier features | Feature byte |
-| `0D` | Maximum volume limit | `00` through `A0` |
 | `11` | Volume up | Data ignored, SDK sends `00` |
 | `12` | Volume down | Data ignored, SDK sends `00` |
 | `14` | Device information request | Data varies by firmware |
-| `1C` | Zone name | Data is ASCII string in extended usage |
-| `1D` | Preamplifier volume mode | Mode byte |
-| `26` | Volume BCD format | BCD volume byte |
 
-The SDK implements the stable output controls: standby/output enable, mute,
-source selection, absolute volume, volume up/down, and all-parameters request.
+The SDK implements the stable control-plane commands for mute, source
+selection, absolute volume, volume up/down, all-parameters readback, and device
+information readback. It intentionally does not expose direct amplifier standby
+or configuration helpers.
 
 ### Direct Amplifier Source Map
 
@@ -706,6 +725,18 @@ The data byte maps source numbers to protocol source values:
 | S6 | `01` |
 | S7 | `02` |
 | S8 | `04` |
+
+Some matrix-style integrations identify these same physical inputs with
+zero-based source IDs. In that form, source `0` is the first analog input and
+is encoded as data byte `05`. Construct the client with `source_base=0` when
+using those IDs:
+
+```python
+amp = MirageAmplifier("192.168.1.60", source_base=0)
+amp.assign_source_to_output(source=0, output=1)   # first analog input
+amp.assign_source_to_output(source=7, output=1)   # eighth local input
+amp.assign_source_to_output(source=33, output=1)  # extended matrix source
+```
 
 Examples:
 
@@ -769,30 +800,6 @@ amp.output_volume_up(1)
 amp.output_volume_down(1)
 ```
 
-### Direct Amplifier Output Enable
-
-The direct amplifier protocol uses standby state. The SDK presents this as
-output enabled/disabled:
-
-```text
-010100
-010101
-```
-
-Meaning:
-
-- `010100`: output 1 enabled, standby off.
-- `010101`: output 1 disabled, standby on.
-
-Python:
-
-```python
-amp.enable_output(1)
-amp.disable_output(1)
-amp.enable_all_outputs()
-amp.disable_all_outputs()
-```
-
 ### Direct Amplifier Diagnostics
 
 Read device ID:
@@ -812,22 +819,10 @@ The four hex characters after `AFFF` are the device ID, `00D4` in this example.
 Python:
 
 ```python
-from autonomic import MirageAmplifierDiagnostics
+from autonomic import MirageAmplifier
 
-diag = MirageAmplifierDiagnostics("192.168.1.60")
-device_id = diag.get_device_id()
-```
-
-Factory reset command construction:
-
-```text
-42FF<device-id>0355AA
-```
-
-The SDK requires `confirm=True` before sending this command:
-
-```python
-diag.factory_reset(confirm=True, device_id="00D4")
+amp = MirageAmplifier("192.168.1.60")
+device_id = amp.get_device_id()
 ```
 
 ## High-Level Python API
@@ -850,6 +845,48 @@ diag.factory_reset(confirm=True, device_id="00D4")
 - `items`: list of `BrowseItem`.
 - `raw`: raw response text.
 - `total`, `start`, `more`: convenience accessors.
+- Returned by low-level `browse_*` methods when raw protocol detail is needed.
+
+`AutonomicOutput` and `AutonomicSource`:
+
+- Pydantic models returned by ergonomic `list_outputs()` and `list_sources()`.
+  Disabled items are omitted unless `include_disabled=True` is passed.
+- `id`, `guid`, `name`, `attributes`, and `raw_xml` expose parsed protocol data.
+- `disabled` is read-only state parsed from common disabled, enabled, hidden,
+  and availability attributes when devices expose it.
+- Objects are bound to the client that created them, so helper methods work:
+  `client.list_outputs()[0].mute()`, `output.set_volume(50)`, and
+  `source.assign_to(output)`.
+- Source/output assignment is symmetric: `source.assign_to(output)` and
+  `output.assign(source)` make the same client call.
+- `AutonomicClient.all_outputs()` returns an `AutonomicOutputGroup`, an
+  iterable fanout proxy with the same control helpers as a single output:
+  `assign()`, `set_volume()`, `mute()`, `unmute()`, `volume_up()`,
+  `volume_down()`, `set_power()`, and `set_is_on()`.
+- `AutonomicClient` supports a source alias map keyed by source GUID. Aliases
+  change the returned object's display `name` and allow alias names in high
+  level source assignment calls, while preserving the device's original source
+  name in `source.attributes["name"]`. Aliases are local to the SDK and do not
+  send any source rename or configuration command.
+- `AutonomicClient.source_by_name(name)` and `output_by_name(name)` return
+  typed objects by case-insensitive display name using the normal filtered list
+  APIs. Pass `include_disabled=True` to search disabled items too.
+- Output objects expose read-only state such as `is_on`, `muted`, `volume`,
+  and current source fields when the device provides them.
+- MRAD/MAS output objects can set runtime zone power with `output.set_is_on()`
+  or `output.set_power()`. This updates the zone `PowerOn` state; it is not an
+  enable/disable configuration-plane helper and is not mapped to direct
+  amplifier standby.
+- Output/source objects do not expose enable, disable, or rename helpers.
+- Client methods accept object instances, IDs, GUIDs, or names where applicable.
+
+`AmplifierResponse`:
+
+- `command`: direct amplifier command byte.
+- `output`: decoded output number.
+- `raw_output`: raw output byte.
+- `data`: response payload bytes.
+- `raw`: normalized raw response line.
 
 `BrowseItem`:
 
@@ -891,10 +928,11 @@ with MirageAudioSystem("192.168.1.50") as mas:
     mas.initialize(host_hint="192.168.1.50")
     outputs = mas.list_outputs()
     sources = mas.list_sources()
-    mas.assign_source_to_output(sources.items[0].guid, outputs.items[0].id)
-    mas.set_output_volume(outputs.items[0].id, 60)
-    mas.set_output_mute(outputs.items[0].id, False)
-    mas.enable_output(outputs.items[0].id)
+    sources[0].assign_to(outputs[0])
+    outputs[1].assign(sources[0])
+    sources[0].assign_to_all_outputs()
+    outputs[0].set_volume(60)
+    outputs[0].unmute()
 ```
 
 ### `MirageAmplifier`
@@ -906,52 +944,101 @@ from autonomic import MirageAmplifier
 
 amp = MirageAmplifier("192.168.1.60")
 amp.get_device_id()
-amp.list_outputs()
-amp.list_sources()
-amp.assign_source_to_output(7, 1)
-amp.set_output_volume(1, 0x40)
-amp.set_output_mute(1, False)
-amp.enable_output(1)
+outputs = amp.list_outputs()
+sources = amp.list_sources()
+sources[6].assign_to(outputs[0])
+outputs[1].assign(sources[6])
+sources[0].assign_to_all_outputs()
+outputs[0].set_volume(0x40)
+outputs[0].unmute()
 ```
 
-### `MA6Client`
+### `AutonomicClient`
 
-Use for seamless control when the device may be either a MAS/MA6-style system
-or a standalone amplifier.
+Use for seamless control when the device may be either a MAS/MRAD system or a
+standalone direct amplifier. `AutonomicClient` auto-detects and initializes
+itself during construction. Use `auto_initialize=False` only when building an
+offline object for tests or when you need to patch/customize low-level clients
+before the first protocol call.
 
 ```python
-from autonomic import MA6Client
+from autonomic import AutonomicClient
 
-with MA6Client("192.168.1.50") as client:
-    client.initialize(host_hint="192.168.1.50")
+with AutonomicClient("192.168.1.50") as client:
     print(client.detect_mode())  # "mrad" or "amplifier"
 
     outputs = client.list_outputs()
     sources = client.list_sources()
-
-    output = outputs.items[0].id or outputs.items[0].guid
-    source = sources.items[0].id or sources.items[0].guid
+    source = client.source_by_name("Alpha")
+    output = client.output_by_name("Kitchen")
 
     client.assign_source_to_output(source, output)
-    client.set_output_volume(output, 60)
-    client.set_output_mute(output, False)
-    client.enable_output(output)
+    output.set_is_on(True)
+    output.set_volume(60)
+    output.unmute()
+```
+
+The default source aliases are:
+
+```python
+{
+    "000027fb-f8a9-f6be-a465-3d0fbee12977": "Alpha",
+    "000027fc-f8a9-f6be-a465-3d0fbee12977": "Beta",
+    "0000008a-f8a9-f6be-a465-3d0fbee12977": "Gamma",
+    "0000008b-f8a9-f6be-a465-3d0fbee12977": "Delta",
+}
+```
+
+Pass `source_aliases={...}` to provide a different map, or
+`source_aliases=None` to disable aliases:
+
+```python
+from autonomic import AutonomicClient
+
+with AutonomicClient("192.168.1.50") as client:
+    alpha = client.source_by_name("Alpha")
+    client.all_outputs().assign(alpha)
+
+with AutonomicClient("192.168.1.50", source_aliases=None) as raw_client:
+    print(raw_client.list_sources()[0].attributes["name"])
 ```
 
 In amplifier mode, source identifiers are direct source numbers `1` through `8`.
 In MRAD mode, source identifiers may be source GUIDs, source IDs, or names.
 
-The `autonomic_ma6` package is a compatibility shim:
+Set every output to a source:
 
 ```python
-from autonomic_ma6 import MA6Client
+from autonomic import AutonomicClient
+
+with AutonomicClient("192.168.1.50") as client:
+    source = client.list_sources()[0]
+    client.all_outputs().assign(source)
 ```
 
-## Compatibility Notes From Live Devices
+Equivalent object-first form:
+
+```python
+with AutonomicClient("192.168.1.50") as client:
+    outputs = client.all_outputs()
+    outputs.assign(client.source_by_name("Alpha"))
+    outputs.set_volume(50)
+    outputs.unmute()
+```
+
+The same operation is available as a runnable example:
+
+```bash
+python examples/set_all_outputs_to_source.py 192.168.1.50
+python examples/set_all_outputs_to_source.py 192.168.1.50 COAX2
+python examples/set_all_outputs_to_source.py 192.168.1.60 1 --mode amplifier
+```
+
+## Live Device Notes
 
 The client has been sanity-checked against two device profiles:
 
-MAS/MA6-style system:
+MAS/MRAD system:
 
 - `5004` open for MMS.
 - `5006` open for MRAD.
@@ -966,7 +1053,7 @@ Standalone M-6250-style amplifier:
 - `5006` closed.
 - `17037` open.
 - `2FFF` returned an `AFFF...` device-id response.
-- `MA6Client` detected amplifier mode and used direct amplifier commands.
+- `AutonomicClient` detected amplifier mode and used direct amplifier commands.
 
 ## Tests
 

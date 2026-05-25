@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .base import AutonomicClient, ProtocolConnection
+from .base import ProtocolClient, ProtocolConnection
 from .models import BrowseResponse, CommandResponse, StatusSnapshot
 from .protocol import events_to_snapshot, format_assignment, format_command
 
 MMS_PORT = 5004
 
 
-class MirageMediaServer(AutonomicClient):
+class MirageMediaServer(ProtocolClient):
     """Client for the Mirage Media Server control protocol on TCP port 5004."""
 
     def __init__(
@@ -17,7 +17,7 @@ class MirageMediaServer(AutonomicClient):
         host: str,
         port: int = MMS_PORT,
         *,
-        timeout: float = 3.0,
+        timeout: float = 5.0,
         connection: ProtocolConnection | None = None,
     ):
         super().__init__(host, port, timeout=timeout, connection=connection)
