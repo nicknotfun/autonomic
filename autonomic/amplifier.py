@@ -17,6 +17,7 @@ AMPLIFIER_DIAGNOSTIC_PORT = 17037
 AMPLIFIER_HTTP_PORT = 80
 DEVICE_ID_COMMAND = "2FFF"
 ALL_OUTPUTS = "FF"
+AMPLIFIER_RAW_MAX_VOLUME = 0xA0
 AmplifierOutputRef = int | str | AutonomicOutput
 AmplifierSourceRef = int | str | AutonomicSource
 _DEVICE_ID_RE = re.compile(r"AFFF(?P<id>[0-9A-Fa-f]{4})")
@@ -90,6 +91,10 @@ class MirageAmplifier:
         return f"{_byte(command)}{_output_address(output)}{_data_bytes(data)}"
 
     @staticmethod
+    def build_query_command(command: int | str, output: int | str) -> str:
+        return f"{_byte(command)}{_output_address(output)}"
+
+    @staticmethod
     def parse_device_id(response: str) -> str:
         match = _DEVICE_ID_RE.search(response)
         if not match:
@@ -156,7 +161,10 @@ class MirageAmplifier:
             if len(line) < 4:
                 continue
             try:
-                keys.add((int(line[0:2], 16), decode_output_address(int(line[2:4], 16))))
+                raw_output = int(line[2:4], 16)
+                if raw_output == 0xFF:
+                    continue
+                keys.add((int(line[0:2], 16), decode_output_address(raw_output)))
             except ValueError:
                 continue
         return keys
@@ -188,6 +196,7 @@ class MirageAmplifier:
         body = "".join(f"{command}{CRLF}" for command in commands).encode("ascii")
         chunks: list[bytes] = []
         expected_keys = self.expected_response_keys(commands)
+        expected_keys.update(self._expected_all_output_response_keys(commands))
         with socket.create_connection((self.host, self.port), timeout=timeout) as sock:
             sock.sendall(body)
             sock.settimeout(min(0.75, timeout))
@@ -222,13 +231,45 @@ class MirageAmplifier:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read().decode("ascii", errors="replace")
 
+    def _expected_all_output_response_keys(self, commands: Iterable[str]) -> set[tuple[int, int]]:
+        keys: set[tuple[int, int]] = set()
+        for command in commands:
+            line = command.upper().rstrip("\r\n")
+            if len(line) < 4:
+                continue
+            try:
+                command_byte = int(line[0:2], 16)
+                raw_output = int(line[2:4], 16)
+            except ValueError:
+                continue
+            if raw_output != 0xFF or command_byte not in {0x01, 0x02, 0x03, 0x04}:
+                continue
+            keys.update((command_byte, output) for output in range(1, self.output_count + 1))
+        return keys
+
     def _source_data_for_instance(self, source: int) -> str:
         if self.source_base == 0:
             return self.encode_matrix_source(source)
         return self.source_data(source)
 
+    def _source_id_for_instance(self, source_data_value: int) -> int:
+        source = self.decode_matrix_source(source_data_value)
+        if self.source_base == 0 or source_data_value >= 0x20:
+            return source
+        return source + 1
+
+    def _source_name_for_instance(self, source_id_value: int) -> str:
+        if source_id_value >= 0x20:
+            return f"Remote {source_id_value - 0x20 + 1}"
+        if self.source_base == 0:
+            return f"S{source_id_value + 1}"
+        return f"S{source_id_value}"
+
     def send_data_command(self, command: int | str, output: int | str, data: int | str | Iterable[int | str] = 0) -> str:
         return self.send_ascii(self.build_data_command(command, output, data))
+
+    def send_query_command(self, command: int | str, output: int | str) -> str:
+        return self.send_ascii(self.build_query_command(command, output))
 
     def browse_outputs(self) -> BrowseResponse:
         items = [
@@ -249,8 +290,10 @@ class MirageAmplifier:
             raw="",
         )
 
-    def list_outputs(self, *, include_disabled: bool = False) -> list[AutonomicOutput]:
+    def list_outputs(self, *, include_disabled: bool = False, include_status: bool = True) -> list[AutonomicOutput]:
         outputs = [AutonomicOutput.from_browse_item(item, client=self) for item in self.browse_outputs().items]
+        if include_status:
+            outputs = self._with_status(outputs)
         return omit_disabled(outputs, include_disabled=include_disabled)
 
     def browse_sources(self) -> BrowseResponse:
@@ -280,6 +323,43 @@ class MirageAmplifier:
     def request_all_parameters(self, output: AmplifierOutputRef) -> str:
         return self.send_data_command("09", output_ref(output), "00")
 
+    def query_output_power(self, output: AmplifierOutputRef) -> list[AmplifierResponse]:
+        return self.poll(self.build_query_command("01", output_ref(output)))
+
+    def query_output_mute(self, output: AmplifierOutputRef) -> list[AmplifierResponse]:
+        return self.poll(self.build_query_command("02", output_ref(output)))
+
+    def query_output_source(self, output: AmplifierOutputRef) -> list[AmplifierResponse]:
+        return self.poll(self.build_query_command("03", output_ref(output)))
+
+    def query_output_volume(self, output: AmplifierOutputRef) -> list[AmplifierResponse]:
+        return self.poll(self.build_query_command("04", output_ref(output)))
+
+    def get_output_status(self, output: AmplifierOutputRef) -> AutonomicOutput:
+        output_value = output_ref(output)
+        output_id = str(_decoded_output_ref(output_value) or output_value)
+        base = AutonomicOutput(
+            id=output_id,
+            name=f"Output {output_id}",
+            kind="Output",
+            address=_output_address(output_value),
+        )
+        return self._with_status([base])[0].bind(self)
+
+    def get_output_statuses(self, outputs: Iterable[AmplifierOutputRef] | None = None) -> list[AutonomicOutput]:
+        if outputs is None:
+            return self.list_outputs(include_status=True)
+        base_outputs = [
+            AutonomicOutput(
+                id=str(_decoded_output_ref(output_ref(output)) or output_ref(output)),
+                name=getattr(output, "name", None) or f"Output {_decoded_output_ref(output_ref(output)) or output_ref(output)}",
+                kind="Output",
+                address=_output_address(output_ref(output)),
+            )
+            for output in outputs
+        ]
+        return [output.bind(self) for output in self._with_status(base_outputs)]
+
     def set_output_mute(self, output: AmplifierOutputRef, state: bool | str = "toggle") -> str:
         if isinstance(state, str):
             normalized = state.lower()
@@ -307,10 +387,20 @@ class MirageAmplifier:
     def mute_all_outputs(self, state: bool | str = True) -> str:
         return self.set_output_mute(ALL_OUTPUTS, state)
 
+    def set_output_power(self, output: AmplifierOutputRef, is_on: bool | str = True) -> str:
+        return self.send_data_command("01", output_ref(output), _power_data(is_on))
+
+    def set_output_is_on(self, output: AmplifierOutputRef, is_on: bool | str = True) -> str:
+        return self.set_output_power(output, is_on)
+
+    def turn_on_output(self, output: AmplifierOutputRef) -> str:
+        return self.set_output_power(output, True)
+
+    def turn_off_output(self, output: AmplifierOutputRef) -> str:
+        return self.set_output_power(output, False)
+
     def set_output_volume(self, output: AmplifierOutputRef, volume: int) -> str:
-        if not 0 <= volume <= 0xA0:
-            raise ValueError("volume must be between 0 and 160 (0xA0)")
-        return self.send_data_command("04", output_ref(output), volume)
+        return self.send_data_command("04", output_ref(output), _volume_to_raw(volume))
 
     def output_volume_up(self, output: AmplifierOutputRef) -> str:
         return self.send_data_command("11", output_ref(output), "00")
@@ -332,6 +422,83 @@ class MirageAmplifier:
 
     def assign_matrix(self, assignments: Mapping[AmplifierOutputRef, AmplifierSourceRef]) -> list[str]:
         return self.assign_output_sources(assignments)
+
+    def _with_status(self, outputs: list[AutonomicOutput]) -> list[AutonomicOutput]:
+        if not outputs:
+            return []
+
+        by_id = {str(output.id): output for output in outputs if output.id is not None}
+        if not by_id:
+            return outputs
+
+        rows = self._poll_status_rows()
+        updates: dict[str, dict[str, object]] = {output_id: {} for output_id in by_id}
+        attr_updates: dict[str, dict[str, str]] = {output_id: {} for output_id in by_id}
+
+        for row in rows:
+            if row.output in (None, 0xFF) or not row.data:
+                continue
+            output_id = str(row.output)
+            if output_id not in by_id:
+                continue
+
+            attrs = attr_updates[output_id]
+            update = updates[output_id]
+
+            if row.command == 0x01:
+                is_on = row.data[0] == 0x01
+                update["is_on"] = is_on
+                attrs["PowerOn"] = "true" if is_on else "false"
+            elif row.command == 0x02:
+                if row.data[0] in {0x00, 0x01}:
+                    muted = row.data[0] == 0x00
+                    update["muted"] = muted
+                    attrs["Mute"] = "true" if muted else "false"
+            elif row.command == 0x03:
+                source_byte = row.data[0]
+                if len(row.data) > 1 and not (source_byte & 0x80) and (row.data[-1] & 0x7F) >= 0x20:
+                    source_byte = row.data[-1]
+                source_data_value = source_byte & 0x7F
+                source_id_value = self._source_id_for_instance(source_data_value)
+                source_name = self._source_name_for_instance(source_id_value)
+                update["source_id"] = str(source_id_value)
+                update["source_name"] = source_name
+                attrs["sourceId"] = str(source_id_value)
+                attrs["sourceName"] = source_name
+                attrs["sourceAddress"] = _byte(source_data_value)
+                if len(row.data) > 1:
+                    attrs["sourceStatusData"] = "".join(_byte(value) for value in row.data)
+                if row.data[0] & 0x80:
+                    update.setdefault("is_on", True)
+                    attrs.setdefault("PowerOn", "true")
+            elif row.command == 0x04:
+                raw_volume = row.data[0]
+                volume = _volume_from_raw(raw_volume)
+                update["volume"] = volume
+                attrs["Volume"] = str(volume)
+                attrs["rawVolume"] = str(raw_volume)
+
+        rendered: list[AutonomicOutput] = []
+        for output in outputs:
+            if output.id is None or str(output.id) not in by_id:
+                rendered.append(output)
+                continue
+            output_id = str(output.id)
+            update = updates[output_id]
+            attrs = dict(output.attributes)
+            attrs.update(attr_updates[output_id])
+            update["attributes"] = attrs
+            rendered.append(output.model_copy(update=update))
+        return rendered
+
+    def _poll_status_rows(self) -> list[AmplifierResponse]:
+        commands = [
+            self.build_query_command("01", ALL_OUTPUTS),
+            self.build_query_command("02", ALL_OUTPUTS),
+            self.build_query_command("03", ALL_OUTPUTS),
+            self.build_query_command("04", ALL_OUTPUTS),
+        ]
+        return self.poll(commands)
 
 
 def _byte(value: int | str) -> str:
@@ -355,6 +522,36 @@ def _data_bytes(data: int | str | Iterable[int | str]) -> str:
     if isinstance(data, int):
         return _byte(data)
     return "".join(_byte(value) for value in data)
+
+
+def _volume_to_raw(volume: int) -> int:
+    value = int(volume)
+    if not 0 <= value <= 100:
+        raise ValueError("volume must be between 0 and 100")
+    return int((value * AMPLIFIER_RAW_MAX_VOLUME) / 100)
+
+
+def _volume_from_raw(raw_volume: int) -> int:
+    raw = max(0, min(AMPLIFIER_RAW_MAX_VOLUME, int(raw_volume)))
+    return int((raw * 100) / AMPLIFIER_RAW_MAX_VOLUME)
+
+
+def _power_data(state: bool | str) -> str:
+    if isinstance(state, bool):
+        return "01" if state else "00"
+    normalized = state.strip().lower()
+    if normalized in {"true", "on", "1", "yes"}:
+        return "01"
+    if normalized in {"false", "off", "0", "no"}:
+        return "00"
+    raise ValueError("power state must be true/on or false/off")
+
+
+def _decoded_output_ref(output: int | str) -> int | None:
+    try:
+        return decode_output_address(encode_output_address(output))
+    except (TypeError, ValueError):
+        return None
 
 
 def encode_output_address(output: int | str) -> int:

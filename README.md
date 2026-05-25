@@ -580,8 +580,8 @@ only available for MRAD/MAS mode.
 For MRAD/MAS output-targeted controls, the SDK powers the zone on before
 source assignment, volume changes, and targeted mute/unmute commands. If the
 device still returns a zone-is-off error, the SDK sends `Power On` and retries
-the original command once. Direct amplifier mode does not map this behavior to
-standby.
+the original command once. Direct amplifier mode uses its own runtime power
+command and does not apply this MRAD retry behavior.
 
 ### MRAD Zone Groups
 
@@ -638,6 +638,10 @@ This means:
 - `0A`: output address 10.
 - `40`: volume value 64 decimal.
 
+The low-level protocol stores direct amplifier volume as `0x00` through
+`0xA0`. The Python API exposes volume as a normal `0` through `100` percentage
+and scales to/from the raw protocol value.
+
 ### Polling and Batched Commands
 
 The direct amplifier endpoint accepts one or more CRLF-terminated hex commands
@@ -650,6 +654,7 @@ from autonomic import MirageAmplifier
 
 amp = MirageAmplifier("192.168.1.60", transport="tcp")
 rows = amp.poll(["0101", "0201", "0301", "0401"])
+outputs = amp.list_outputs()  # polls power, mute, source, and volume
 ```
 
 Some systems expose the same polling shape over HTTP at `/poll.cgi`:
@@ -688,8 +693,8 @@ FF = all outputs
 The SDK accepts integer outputs or hex-string outputs:
 
 ```python
-amp.set_output_volume(10, 0x40)
-amp.set_output_volume("0A", 0x40)
+amp.set_output_volume(10, 40)
+amp.set_output_volume("0A", 40)
 amp.set_output_mute("all", True)
 ```
 
@@ -697,18 +702,20 @@ amp.set_output_mute("all", True)
 
 | Command | Name | Data |
 | --- | --- | --- |
+| `01` | Runtime output power | `00` off, `01` on |
 | `02` | Mute | `00` mute, `01` unmute, `02` toggle |
 | `03` | Source selection | Source data value from the source map below |
-| `04` | Volume | `00` through `A0` |
+| `04` | Volume | Raw protocol `00` through `A0`; Python API uses `0` through `100` |
 | `09` | Send all parameters | Usually `00` |
 | `11` | Volume up | Data ignored, SDK sends `00` |
 | `12` | Volume down | Data ignored, SDK sends `00` |
 | `14` | Device information request | Data varies by firmware |
 
 The SDK implements the stable control-plane commands for mute, source
-selection, absolute volume, volume up/down, all-parameters readback, and device
-information readback. It intentionally does not expose direct amplifier standby
-or configuration helpers.
+selection, runtime output power, absolute volume, volume up/down,
+all-parameters readback, and device information readback. It intentionally does
+not expose direct amplifier configuration helpers such as naming, enablement, or
+stack setup.
 
 ### Direct Amplifier Source Map
 
@@ -737,6 +744,70 @@ amp.assign_source_to_output(source=0, output=1)   # first analog input
 amp.assign_source_to_output(source=7, output=1)   # eighth local input
 amp.assign_source_to_output(source=33, output=1)  # extended matrix source
 ```
+
+On stacked MAS systems, the zero-based direct source IDs may include internal
+players ahead of the physical inputs. On the observed `6012` amplifier, direct
+IDs `0`, `1`, and `2` are player sources, while direct ID `3` is local `S4`
+and maps to the MAS source named `A1` / `Passthrough`. The direct source
+selection byte for that local A1 path is `03`.
+
+The unified client exposes the same direct amplifier shape options:
+
+```python
+client = AutonomicClient(
+    "192.168.1.60",
+    mode="amplifier",
+    amplifier_output_count=16,
+    amplifier_source_count=12,
+    amplifier_source_base=0,
+)
+```
+
+When using `AutonomicClient` in direct amplifier mode, all configured direct
+source slots remain visible. The known local and eAudioCast sources are
+identified with preferred names and GUIDs so they can be selected by name:
+
+| Direct source | Presented name | GUID |
+| --- | --- | --- |
+| Device `00D4` local `S7` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
+| Device `00D4` local `S8` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
+| Device `6012` local `S4` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
+| Device `6012` local `S7` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Device `6012` local `S8` | Delta | `000027e3-df88-bd41-abbd-079c4e743694` |
+| Remote slot `00` / selector `0x20` | Delta | `000027e3-df88-bd41-abbd-079c4e743694` |
+| Remote slot `01` / selector `0x21` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Remote slot `02` / selector `0x22` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
+| Remote slot `03` / selector `0x23` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
+| Remote slot `04` / selector `0x24` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
+
+The remote slots are selected by their selector byte, not by the local source
+map. Slot `00` is selector `0x20`, slot `01` is selector `0x21`, and so on.
+For example, remote slot `03` is selected by sending source data `23`:
+
+```text
+030923
+030A23
+```
+
+Those commands set outputs 9 and 10 to remote slot `03`.
+
+The lower-level `MirageAmplifier` client still exposes protocol slot names.
+Direct amplifier outputs are presented with the local house names:
+
+| Output | Presented name |
+| --- | --- |
+| 1 | Kitchen |
+| 2 | Dining |
+| 3 | Living |
+| 4 | Master |
+| 5 | Bathroom |
+| 6 | Foyer |
+| 7 | Sitting |
+| 8 | Passthrough |
+| 9 | Grill |
+| 10 | Patio West |
+| 11 | Patio East |
+| 12 | Pool |
 
 Examples:
 
@@ -773,6 +844,8 @@ Examples:
 
 ```text
 040140
+010101
+010100
 020100
 020101
 020102
@@ -782,7 +855,9 @@ Examples:
 
 Meaning:
 
-- `040140`: set output 1 volume to `0x40`.
+- `040140`: set output 1 raw protocol volume to `0x40` (`40%` in the Python API).
+- `010101`: turn output 1 on.
+- `010100`: turn output 1 off.
 - `020100`: mute output 1.
 - `020101`: unmute output 1.
 - `020102`: toggle mute on output 1.
@@ -792,13 +867,21 @@ Meaning:
 Python:
 
 ```python
-amp.set_output_volume(1, 0x40)
+amp.set_output_power(1, True)
+amp.set_output_power(1, False)
+amp.set_output_volume(1, 40)
 amp.set_output_mute(1, True)
 amp.set_output_mute(1, False)
 amp.toggle_output_mute(1)
 amp.output_volume_up(1)
 amp.output_volume_down(1)
 ```
+
+Direct amplifier volume uses a percentage in the Python API. The wire value is
+scaled onto the amplifier's raw range `00` through `A0`. MAS status may expose
+the same volume on a `0` through `80` zone scale. For example, direct `80%`
+corresponds to raw `0x80` and normally appears as `64/80` in MAS status;
+direct `90%` appears as `72/80`.
 
 ### Direct Amplifier Diagnostics
 
@@ -824,6 +907,59 @@ from autonomic import MirageAmplifier
 amp = MirageAmplifier("192.168.1.60")
 device_id = amp.get_device_id()
 ```
+
+Read remote source slots:
+
+```text
+4FFF
+```
+
+Each populated response line begins with `4FFF` followed by a payload:
+
+| Payload byte range | Meaning |
+| --- | --- |
+| `0` | Remote slot ID |
+| `1` through `16` | 16-byte UUID of the backing amplifier/source device |
+| `17` | Zero-based source index on the backing device |
+| `18+` | UTF-8 source name encoded as hex |
+
+Empty slots are returned as the slot byte followed by `00`.
+
+Example populated lines:
+
+```text
+4FFF008768126C88DF41BDABBD079C4E7436940A44656C7461
+4FFF018768126C88DF41BDABBD079C4E7436940947616D6D61
+4FFF028768126C88DF41BDABBD079C4E74369403506173737468726F756768
+4FFF0300194E67A9F8BEF6A4653D0FBEE1297706434F415832
+```
+
+Decoded:
+
+| Slot | Selector | Backing UUID | Source index | Name |
+| --- | --- | --- | --- | --- |
+| `00` | `0x20` | `8768126c-88df-41bd-abbd-079c4e743694` | `10` | `Delta` |
+| `01` | `0x21` | `8768126c-88df-41bd-abbd-079c4e743694` | `9` | `Gamma` |
+| `02` | `0x22` | `8768126c-88df-41bd-abbd-079c4e743694` | `3` | `Passthrough` |
+| `03` | `0x23` | `00194e67-a9f8-bef6-a465-3d0fbee12977` | `6` | `COAX2` |
+
+The high-level `AutonomicClient` intentionally does not expose remote-slot
+configuration writes. It treats these slots as existing sources for routing,
+volume, mute, and power control only.
+
+### Direct Amplifier Summary Script
+
+The repository includes `summary.py` for quick direct amplifier diagnostics:
+
+```bash
+python summary.py
+python summary.py 10.1.0.201 --raw-status
+```
+
+It prints the source list, preferred source names, output names, power, mute,
+volume, selected source, and optional raw source-status rows. This is useful
+when comparing direct source bytes such as `23` against the high-level source
+name presented by the SDK.
 
 ## High-Level Python API
 
@@ -873,10 +1009,10 @@ device_id = amp.get_device_id()
   APIs. Pass `include_disabled=True` to search disabled items too.
 - Output objects expose read-only state such as `is_on`, `muted`, `volume`,
   and current source fields when the device provides them.
-- MRAD/MAS output objects can set runtime zone power with `output.set_is_on()`
-  or `output.set_power()`. This updates the zone `PowerOn` state; it is not an
-  enable/disable configuration-plane helper and is not mapped to direct
-  amplifier standby.
+- Output objects can set runtime power with `output.set_is_on()` or
+  `output.set_power()`. On MRAD/MAS this updates the zone `PowerOn` state; in
+  direct amplifier mode it sends the runtime `01` power command. It is not an
+  enable/disable configuration-plane helper.
 - Output/source objects do not expose enable, disable, or rename helpers.
 - Client methods accept object instances, IDs, GUIDs, or names where applicable.
 
@@ -944,12 +1080,13 @@ from autonomic import MirageAmplifier
 
 amp = MirageAmplifier("192.168.1.60")
 amp.get_device_id()
-outputs = amp.list_outputs()
+outputs = amp.list_outputs()  # includes direct amp status where reported
 sources = amp.list_sources()
 sources[6].assign_to(outputs[0])
 outputs[1].assign(sources[6])
 sources[0].assign_to_all_outputs()
-outputs[0].set_volume(0x40)
+outputs[0].set_power(True)
+outputs[0].set_volume(40)
 outputs[0].unmute()
 ```
 
@@ -957,9 +1094,10 @@ outputs[0].unmute()
 
 Use for seamless control when the device may be either a MAS/MRAD system or a
 standalone direct amplifier. `AutonomicClient` auto-detects and initializes
-itself during construction. Use `auto_initialize=False` only when building an
-offline object for tests or when you need to patch/customize low-level clients
-before the first protocol call.
+itself during construction. If no host is provided, it connects to
+`10.1.0.200`. Use `auto_initialize=False` only when building an offline object
+for tests or when you need to patch/customize low-level clients before the
+first protocol call.
 
 ```python
 from autonomic import AutonomicClient
