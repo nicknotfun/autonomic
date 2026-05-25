@@ -76,18 +76,18 @@ class AutonomicClient:
             self.amplifier.get_device_id()
         self._initialized = True
 
-    def list_zones(self, *, include_disabled: bool = False) -> list[AutonomicOutput]:
-        return self.list_outputs(include_disabled=include_disabled)
+    def list_zones(self, *, include_disabled: bool = False, include_status: bool = True) -> list[AutonomicOutput]:
+        return self.list_outputs(include_disabled=include_disabled, include_status=include_status)
 
-    def list_outputs(self, *, include_disabled: bool = False) -> list[AutonomicOutput]:
+    def list_outputs(self, *, include_disabled: bool = False, include_status: bool = True) -> list[AutonomicOutput]:
         if self._backend() == "mrad":
             outputs = self.audio.list_outputs(include_disabled=include_disabled)
         else:
-            outputs = self.amplifier.list_outputs(include_disabled=include_disabled)
+            outputs = self.amplifier.list_outputs(include_disabled=include_disabled, include_status=include_status)
         return [self._with_output_aliases(output).bind(self) for output in outputs]
 
-    def all_outputs(self, *, include_disabled: bool = False) -> AutonomicOutputGroup:
-        return AutonomicOutputGroup(outputs=self.list_outputs(include_disabled=include_disabled)).bind(self)
+    def all_outputs(self, *, include_disabled: bool = False, include_status: bool = True) -> AutonomicOutputGroup:
+        return AutonomicOutputGroup(outputs=self.list_outputs(include_disabled=include_disabled, include_status=include_status)).bind(self)
 
     def list_sources(self, *, include_disabled: bool = False) -> list[AutonomicSource]:
         if self._backend() == "mrad":
@@ -102,8 +102,14 @@ class AutonomicClient:
                 return source
         raise LookupError(f"No Autonomic source named {name!r}")
 
-    def output_by_name(self, name: str, *, include_disabled: bool = False) -> AutonomicOutput:
-        for output in self.list_outputs(include_disabled=include_disabled):
+    def output_by_name(
+        self,
+        name: str,
+        *,
+        include_disabled: bool = False,
+        include_status: bool = True,
+    ) -> AutonomicOutput:
+        for output in self.list_outputs(include_disabled=include_disabled, include_status=include_status):
             if _name_matches(output.name, name):
                 return output
         raise LookupError(f"No Autonomic output named {name!r}")
@@ -203,12 +209,12 @@ class AutonomicClient:
             return self.audio.mute_all_outputs(state)
         return self.amplifier.mute_all_outputs(state)
 
-    def set_output_power(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse:
-        if self._backend() != "mrad":
-            raise AutonomicError("Output power state is only available in MRAD/MAS mode")
-        return self.audio.set_output_power(output, is_on)
+    def set_output_power(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse | str:
+        if self._backend() == "mrad":
+            return self.audio.set_output_power(output, is_on)
+        return self.amplifier.set_output_power(output, is_on)
 
-    def set_output_is_on(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse:
+    def set_output_is_on(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse | str:
         return self.set_output_power(output, is_on)
 
     def play(self) -> CommandResponse:

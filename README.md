@@ -580,8 +580,8 @@ only available for MRAD/MAS mode.
 For MRAD/MAS output-targeted controls, the SDK powers the zone on before
 source assignment, volume changes, and targeted mute/unmute commands. If the
 device still returns a zone-is-off error, the SDK sends `Power On` and retries
-the original command once. Direct amplifier mode does not map this behavior to
-standby.
+the original command once. Direct amplifier mode uses its own runtime power
+command and does not apply this MRAD retry behavior.
 
 ### MRAD Zone Groups
 
@@ -638,6 +638,10 @@ This means:
 - `0A`: output address 10.
 - `40`: volume value 64 decimal.
 
+The low-level protocol stores direct amplifier volume as `0x00` through
+`0xA0`. The Python API exposes volume as a normal `0` through `100` percentage
+and scales to/from the raw protocol value.
+
 ### Polling and Batched Commands
 
 The direct amplifier endpoint accepts one or more CRLF-terminated hex commands
@@ -650,6 +654,7 @@ from autonomic import MirageAmplifier
 
 amp = MirageAmplifier("192.168.1.60", transport="tcp")
 rows = amp.poll(["0101", "0201", "0301", "0401"])
+outputs = amp.list_outputs()  # polls power, mute, source, and volume
 ```
 
 Some systems expose the same polling shape over HTTP at `/poll.cgi`:
@@ -688,8 +693,8 @@ FF = all outputs
 The SDK accepts integer outputs or hex-string outputs:
 
 ```python
-amp.set_output_volume(10, 0x40)
-amp.set_output_volume("0A", 0x40)
+amp.set_output_volume(10, 40)
+amp.set_output_volume("0A", 40)
 amp.set_output_mute("all", True)
 ```
 
@@ -697,18 +702,20 @@ amp.set_output_mute("all", True)
 
 | Command | Name | Data |
 | --- | --- | --- |
+| `01` | Runtime output power | `00` off, `01` on |
 | `02` | Mute | `00` mute, `01` unmute, `02` toggle |
 | `03` | Source selection | Source data value from the source map below |
-| `04` | Volume | `00` through `A0` |
+| `04` | Volume | Raw protocol `00` through `A0`; Python API uses `0` through `100` |
 | `09` | Send all parameters | Usually `00` |
 | `11` | Volume up | Data ignored, SDK sends `00` |
 | `12` | Volume down | Data ignored, SDK sends `00` |
 | `14` | Device information request | Data varies by firmware |
 
 The SDK implements the stable control-plane commands for mute, source
-selection, absolute volume, volume up/down, all-parameters readback, and device
-information readback. It intentionally does not expose direct amplifier standby
-or configuration helpers.
+selection, runtime output power, absolute volume, volume up/down,
+all-parameters readback, and device information readback. It intentionally does
+not expose direct amplifier configuration helpers such as naming, enablement, or
+stack setup.
 
 ### Direct Amplifier Source Map
 
@@ -773,6 +780,8 @@ Examples:
 
 ```text
 040140
+010101
+010100
 020100
 020101
 020102
@@ -782,7 +791,9 @@ Examples:
 
 Meaning:
 
-- `040140`: set output 1 volume to `0x40`.
+- `040140`: set output 1 raw protocol volume to `0x40` (`40%` in the Python API).
+- `010101`: turn output 1 on.
+- `010100`: turn output 1 off.
 - `020100`: mute output 1.
 - `020101`: unmute output 1.
 - `020102`: toggle mute on output 1.
@@ -792,7 +803,9 @@ Meaning:
 Python:
 
 ```python
-amp.set_output_volume(1, 0x40)
+amp.set_output_power(1, True)
+amp.set_output_power(1, False)
+amp.set_output_volume(1, 40)
 amp.set_output_mute(1, True)
 amp.set_output_mute(1, False)
 amp.toggle_output_mute(1)
@@ -873,10 +886,10 @@ device_id = amp.get_device_id()
   APIs. Pass `include_disabled=True` to search disabled items too.
 - Output objects expose read-only state such as `is_on`, `muted`, `volume`,
   and current source fields when the device provides them.
-- MRAD/MAS output objects can set runtime zone power with `output.set_is_on()`
-  or `output.set_power()`. This updates the zone `PowerOn` state; it is not an
-  enable/disable configuration-plane helper and is not mapped to direct
-  amplifier standby.
+- Output objects can set runtime power with `output.set_is_on()` or
+  `output.set_power()`. On MRAD/MAS this updates the zone `PowerOn` state; in
+  direct amplifier mode it sends the runtime `01` power command. It is not an
+  enable/disable configuration-plane helper.
 - Output/source objects do not expose enable, disable, or rename helpers.
 - Client methods accept object instances, IDs, GUIDs, or names where applicable.
 
@@ -944,12 +957,13 @@ from autonomic import MirageAmplifier
 
 amp = MirageAmplifier("192.168.1.60")
 amp.get_device_id()
-outputs = amp.list_outputs()
+outputs = amp.list_outputs()  # includes direct amp status where reported
 sources = amp.list_sources()
 sources[6].assign_to(outputs[0])
 outputs[1].assign(sources[6])
 sources[0].assign_to_all_outputs()
-outputs[0].set_volume(0x40)
+outputs[0].set_power(True)
+outputs[0].set_volume(40)
 outputs[0].unmute()
 ```
 

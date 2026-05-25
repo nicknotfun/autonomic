@@ -201,13 +201,34 @@ class AutonomicClientTests(unittest.TestCase):
         client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False)
         sent: list[str] = []
 
-        def fake_send(command: str) -> str:
-            sent.append(command)
-            if command == "2FFF":
+        def fake_send_commands(commands, *, timeout=None) -> str:
+            normalized = [command.upper().rstrip("\r\n") for command in commands]
+            sent.extend(normalized)
+            if normalized == ["2FFF"]:
                 return "AFFF00D40102030405060708"
-            return "OK"
+            return ""
 
-        client.amplifier.send_ascii = fake_send  # type: ignore[method-assign]
+        def fake_send(command: str) -> str:
+            return fake_send_commands([command]).strip()
+
+        def fake_status(commands, *, timeout=None) -> str:
+            normalized = [command.upper().rstrip("\r\n") for command in commands]
+            sent.extend(normalized)
+            if normalized == ["2FFF"]:
+                return "AFFF00D40102030405060708"
+            responses = {
+                "01FF": "",
+                "02FF": "",
+                "03FF": "",
+                "04FF": "",
+            }
+            return "\n".join(responses.get(command, "") for command in normalized)
+
+        def fake_status_send(command: str) -> str:
+            return fake_status([command]).strip()
+
+        client.amplifier.send_commands = fake_status  # type: ignore[method-assign]
+        client.amplifier.send_ascii = fake_status_send  # type: ignore[method-assign]
 
         self.assertEqual(client.detect_mode(), "amplifier")
         self.assertEqual(client.amplifier.get_device_id(), "00D4")
@@ -218,9 +239,14 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertIsInstance(sources[6], AutonomicSource)
         self.assertEqual(sources[6].attributes["address"], "02")
 
+        sent.clear()
+        client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
+        client.amplifier.send_ascii = fake_send  # type: ignore[method-assign]
+
         client.select_output(outputs[0])
         client.select_source(sources[6])
-        outputs[0].set_volume(0x40)
+        outputs[0].set_power(True)
+        outputs[0].set_volume(50)
         outputs[0].unmute()
         outputs[0].mute()
         sources[7].assign_to(outputs[1])
@@ -231,9 +257,9 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertEqual(
             sent,
             [
-                "2FFF",
                 "030102",
-                "040140",
+                "010101",
+                "040150",
                 "020101",
                 "020100",
                 "030204",
@@ -248,8 +274,39 @@ class AutonomicClientTests(unittest.TestCase):
         with self.assertRaises(AutonomicError):
             client.play()
 
-        with self.assertRaises(AutonomicError):
-            client.set_output_power(outputs[0], True)
+    def test_unified_client_reads_direct_amplifier_output_status(self):
+        client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False, amplifier_output_count=2)
+        sent: list[str] = []
+
+        def fake_send_commands(commands, *, timeout=None) -> str:
+            normalized = [command.upper().rstrip("\r\n") for command in commands]
+            sent.extend(normalized)
+            if normalized == ["2FFF"]:
+                return "AFFF00D40102030405060708"
+            responses = {
+                "01FF": "010101\n010200",
+                "02FF": "020101\n020200",
+                "03FF": "030102\n030204",
+                "04FF": "040150\n040240",
+            }
+            return "\n".join(responses.get(command, "") for command in normalized)
+
+        def fake_send(command: str) -> str:
+            return fake_send_commands([command]).strip()
+
+        client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
+        client.amplifier.send_ascii = fake_send  # type: ignore[method-assign]
+
+        outputs = client.list_outputs()
+
+        self.assertEqual(sent, ["01FF", "02FF", "03FF", "04FF"])
+        self.assertEqual(
+            [(output.is_on, output.muted, output.volume, output.source_name) for output in outputs],
+            [
+                (True, False, 50, "S7"),
+                (False, True, 40, "S8"),
+            ],
+        )
 
 
 if __name__ == "__main__":
