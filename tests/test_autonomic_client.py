@@ -244,8 +244,22 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertEqual(len(sources), 12)
         self.assertIsInstance(outputs[0], AutonomicOutput)
         self.assertIsInstance(sources[6], AutonomicSource)
+        self.assertEqual([output.name for output in outputs], [
+            "Kitchen",
+            "Dining",
+            "Living",
+            "Master",
+            "Bathroom",
+            "Foyer",
+            "Sitting",
+            "Passthrough",
+        ])
+        self.assertEqual(sources[6].name, "Alpha")
+        self.assertEqual(sources[7].name, "Beta")
         self.assertEqual(sources[6].attributes["address"], "02")
         self.assertEqual(sources[11].attributes["address"], "0B")
+        self.assertEqual(client.source_by_name("Alpha").id, "6")
+        self.assertEqual(client.output_by_name("Kitchen").id, "1")
 
         sent.clear()
         client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
@@ -261,6 +275,10 @@ class AutonomicClientTests(unittest.TestCase):
         outputs[1].assign(sources[7])
         client.assign_source_to_outputs(sources[6], outputs[:2])
         client.assign_matrix({outputs[0]: sources[6], outputs[1]: sources[7]})
+        client.assign_source_to_output("Alpha", "Kitchen")
+        client.set_output_volume("Patio West", 50)
+        client.set_output_mute("Patio West", False)
+        client.set_output_power("Patio West", True)
 
         self.assertEqual(
             sent,
@@ -276,6 +294,10 @@ class AutonomicClientTests(unittest.TestCase):
                 "030202",
                 "030102",
                 "030204",
+                "030102",
+                "040A50",
+                "020A01",
+                "010A01",
             ],
         )
 
@@ -311,10 +333,11 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertEqual(
             [(output.is_on, output.muted, output.volume, output.source_name) for output in outputs],
             [
-                (True, False, 50, "S7"),
+                (True, False, 50, "Alpha"),
                 (False, True, 40, "Remote 3"),
             ],
         )
+        self.assertEqual([output.name for output in outputs], ["Kitchen", "Dining"])
 
 
 if __name__ == "__main__":

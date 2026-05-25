@@ -757,6 +757,27 @@ client = AutonomicClient(
 )
 ```
 
+When using `AutonomicClient` in direct amplifier mode, the raw direct slots are
+presented with the local house names:
+
+| Output | Presented name |
+| --- | --- |
+| 1 | Kitchen |
+| 2 | Dining |
+| 3 | Living |
+| 4 | Master |
+| 5 | Bathroom |
+| 6 | Foyer |
+| 7 | Sitting |
+| 8 | Passthrough |
+| 9 | Grill |
+| 10 | Patio West |
+| 11 | Patio East |
+| 12 | Pool |
+
+The raw direct source slots `S7` and `S8` are presented as `Alpha` and `Beta`.
+The lower-level `MirageAmplifier` client still exposes the protocol slot names.
+
 Examples:
 
 ```text

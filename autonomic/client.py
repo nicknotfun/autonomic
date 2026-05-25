@@ -19,6 +19,24 @@ DEFAULT_SOURCE_ALIASES: dict[str, str] = {
     "0000008a-f8a9-f6be-a465-3d0fbee12977": "Gamma",
     "0000008b-f8a9-f6be-a465-3d0fbee12977": "Delta",
 }
+DIRECT_AMPLIFIER_OUTPUT_NAMES: dict[str, str] = {
+    "1": "Kitchen",
+    "2": "Dining",
+    "3": "Living",
+    "4": "Master",
+    "5": "Bathroom",
+    "6": "Foyer",
+    "7": "Sitting",
+    "8": "Passthrough",
+    "9": "Grill",
+    "10": "Patio West",
+    "11": "Patio East",
+    "12": "Pool",
+}
+DIRECT_AMPLIFIER_SOURCE_NAMES: dict[str, str] = {
+    "s7": "Alpha",
+    "s8": "Beta",
+}
 
 
 class AutonomicClient:
@@ -137,7 +155,7 @@ class AutonomicClient:
         target = output if output is not None else self._selected_output
         if target is None:
             raise ValueError("select_source requires output=... or a prior select_output() in amplifier mode")
-        return self.amplifier.assign_source_to_output(source_id(source), target)
+        return self.amplifier.assign_source_to_output(self._direct_source_id(source), self._direct_output_ref(target))
 
     def assign_source_to_output(
         self,
@@ -148,24 +166,29 @@ class AutonomicClient:
     ) -> list[CommandResponse] | list[str]:
         if self._backend() == "mrad":
             return self.audio.assign_source_to_output(self._source_alias_ref(source), output, include_group=include_group)
-        return [self.amplifier.assign_source_to_output(source_id(source), output)]
+        return [self.amplifier.assign_source_to_output(self._direct_source_id(source), self._direct_output_ref(output))]
 
     def assign_source_to_outputs(self, source: SourceRef, outputs: Iterable[OutputRef]) -> list[CommandResponse] | list[str]:
         if self._backend() == "mrad":
             return self.audio.assign_source_to_outputs(self._source_alias_ref(source), outputs)
-        return self.amplifier.assign_source_to_outputs(source_id(source), outputs)
+        return self.amplifier.assign_source_to_outputs(
+            self._direct_source_id(source),
+            [self._direct_output_ref(output) for output in outputs],
+        )
 
     def assign_source_to_all_outputs(self, source: SourceRef) -> list[CommandResponse] | str:
         if self._backend() == "mrad":
             return self.audio.assign_source_to_all_outputs(self._source_alias_ref(source))
-        return self.amplifier.assign_source_to_all_outputs(source_id(source))
+        return self.amplifier.assign_source_to_all_outputs(self._direct_source_id(source))
 
     def assign_output_sources(self, assignments: Mapping[OutputRef, SourceRef]) -> list[CommandResponse] | list[str]:
         if self._backend() == "mrad":
             return self.audio.assign_output_sources(
                 {output: self._source_alias_ref(source) for output, source in assignments.items()}
             )
-        return self.amplifier.assign_output_sources({output: source_id(source) for output, source in assignments.items()})
+        return self.amplifier.assign_output_sources(
+            {self._direct_output_ref(output): self._direct_source_id(source) for output, source in assignments.items()}
+        )
 
     def assign_matrix(self, assignments: Mapping[OutputRef, SourceRef]) -> list[CommandResponse] | list[str]:
         return self.assign_output_sources(assignments)
@@ -179,7 +202,7 @@ class AutonomicClient:
     def set_output_volume(self, output: OutputRef, value: int) -> CommandResponse | str:
         if self._backend() == "mrad":
             return self.audio.set_output_volume(output, value)
-        return self.amplifier.set_output_volume(output, value)
+        return self.amplifier.set_output_volume(self._direct_output_ref(output), value)
 
     def set_all_output_volume(self, value: int) -> list[CommandResponse] | str:
         if self._backend() == "mrad":
@@ -204,7 +227,7 @@ class AutonomicClient:
     def set_output_mute(self, output: OutputRef, state: bool | str = "toggle") -> CommandResponse | str:
         if self._backend() == "mrad":
             return self.audio.set_output_mute(output, state)
-        return self.amplifier.set_output_mute(output, state)
+        return self.amplifier.set_output_mute(self._direct_output_ref(output), state)
 
     def mute_all_outputs(self, state: bool | str = True) -> list[CommandResponse] | str:
         if self._backend() == "mrad":
@@ -214,7 +237,7 @@ class AutonomicClient:
     def set_output_power(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse | str:
         if self._backend() == "mrad":
             return self.audio.set_output_power(output, is_on)
-        return self.amplifier.set_output_power(output, is_on)
+        return self.amplifier.set_output_power(self._direct_output_ref(output), is_on)
 
     def set_output_is_on(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse | str:
         return self.set_output_power(output, is_on)
@@ -265,19 +288,87 @@ class AutonomicClient:
         resolved = output if output is not None else self._selected_output
         if resolved is None:
             raise ValueError("operation requires an output or prior select_output() in amplifier mode")
+        if self._backend() == "amplifier":
+            return self._direct_output_ref(resolved)
         return output_ref(resolved)
 
     def _with_source_alias(self, source: AutonomicSource) -> AutonomicSource:
+        if self._backend() == "amplifier":
+            alias = self._direct_source_alias(source.name, source.id)
+            if alias is not None:
+                return source.model_copy(update={"name": alias})
+            return source
+
         alias = self._source_alias_for_guid(source.guid)
         if alias is None:
             return source
         return source.model_copy(update={"name": alias})
 
     def _with_output_aliases(self, output: AutonomicOutput) -> AutonomicOutput:
+        if self._backend() == "amplifier":
+            update: dict[str, str] = {}
+            output_alias = DIRECT_AMPLIFIER_OUTPUT_NAMES.get(str(output.id))
+            if output_alias is not None:
+                update["name"] = output_alias
+            source_alias = self._direct_source_alias(output.source_name, output.source_id)
+            if source_alias is not None:
+                update["source_name"] = source_alias
+            if not update:
+                return output
+            return output.model_copy(update=update)
+
         alias = self._source_alias_for_guid(output.source_guid)
         if alias is None:
             return output
         return output.model_copy(update={"source_name": alias})
+
+    def _direct_source_id(self, source: SourceRef) -> int:
+        try:
+            return source_id(source)
+        except (TypeError, ValueError):
+            if not isinstance(source, str):
+                raise
+
+        for item in self.list_sources(include_disabled=True):
+            if _name_matches(item.name, source):
+                return source_id(item)
+        for item in self.amplifier.list_sources(include_disabled=True):
+            if _name_matches(item.name, source):
+                return source_id(item)
+        raise ValueError(f"No direct amplifier source named {source!r}")
+
+    def _direct_output_ref(self, output: OutputRef) -> OutputRef:
+        value = output_ref(output)
+        if isinstance(value, str):
+            for output_id, name in DIRECT_AMPLIFIER_OUTPUT_NAMES.items():
+                if _name_matches(name, value):
+                    return int(output_id)
+            if value.strip().isdigit():
+                return int(value.strip())
+        return value
+
+    def _direct_source_alias(self, source_name: str | None, source_id_value: str | None) -> str | None:
+        if source_name:
+            alias = DIRECT_AMPLIFIER_SOURCE_NAMES.get(source_name.strip().lower())
+            if alias is not None:
+                return alias
+        slot_name = self._direct_source_slot_name(source_id_value)
+        if slot_name is None:
+            return None
+        return DIRECT_AMPLIFIER_SOURCE_NAMES.get(slot_name.lower())
+
+    def _direct_source_slot_name(self, source_id_value: str | None) -> str | None:
+        if source_id_value in (None, ""):
+            return None
+        try:
+            numeric_id = int(source_id_value)
+        except (TypeError, ValueError):
+            return None
+        if numeric_id >= 0x20:
+            return None
+        if self.amplifier.source_base == 0:
+            return f"S{numeric_id + 1}"
+        return f"S{numeric_id}"
 
     def _source_alias_for_guid(self, guid: str | None) -> str | None:
         if not guid:
