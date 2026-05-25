@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from autonomic import MirageAmplifier, MirageAmplifierDiagnostics, ProtocolError
+from autonomic import MirageAmplifier, ProtocolError, decode_output_address, encode_output_address
 
 
 class FakeMirageAmplifier(MirageAmplifier):
-    def __init__(self):
-        super().__init__("127.0.0.1")
+    def __init__(self, **kwargs):
+        super().__init__("127.0.0.1", **kwargs)
         self.sent: list[str] = []
 
     def send_ascii(self, command: str) -> str:
@@ -15,21 +15,11 @@ class FakeMirageAmplifier(MirageAmplifier):
         return "OK"
 
 
-class MirageAmplifierDiagnosticsTests(unittest.TestCase):
+class MirageAmplifierDeviceInfoTests(unittest.TestCase):
     def test_parse_device_id_from_support_response(self):
-        self.assertEqual(MirageAmplifierDiagnostics.parse_device_id("AFFF01A80102030405060708"), "01A8")
+        self.assertEqual(MirageAmplifier.parse_device_id("AFFF01A80102030405060708"), "01A8")
         with self.assertRaises(ProtocolError):
-            MirageAmplifierDiagnostics.parse_device_id("NOPE")
-
-    def test_build_factory_reset_command(self):
-        self.assertEqual(MirageAmplifierDiagnostics.build_factory_reset_command("01a8"), "42FF01A80355AA")
-        with self.assertRaises(ValueError):
-            MirageAmplifierDiagnostics.build_factory_reset_command("XYZ")
-
-    def test_factory_reset_requires_confirmation(self):
-        diag = MirageAmplifierDiagnostics("127.0.0.1")
-        with self.assertRaises(ValueError):
-            diag.factory_reset(device_id="01A8")
+            MirageAmplifier.parse_device_id("NOPE")
 
     def test_direct_output_control_command_builders(self):
         self.assertEqual(MirageAmplifier.build_data_command("03", "1F", "02"), "031F02")
@@ -37,8 +27,6 @@ class MirageAmplifierDiagnosticsTests(unittest.TestCase):
         self.assertEqual(MirageAmplifier.source_data(7), "02")
 
         amp = FakeMirageAmplifier()
-        amp.enable_output(10)
-        amp.disable_output(10)
         amp.set_output_mute(10, True)
         amp.set_output_mute(10, False)
         amp.set_output_mute(10, "toggle")
@@ -53,8 +41,6 @@ class MirageAmplifierDiagnosticsTests(unittest.TestCase):
         self.assertEqual(
             amp.sent,
             [
-                "010A00",
-                "010A01",
                 "020A00",
                 "020A01",
                 "020A02",
@@ -75,6 +61,23 @@ class MirageAmplifierDiagnosticsTests(unittest.TestCase):
             amp.set_output_volume(1, 0xA1)
         with self.assertRaises(ValueError):
             amp.assign_source_to_output(9, 1)
+
+    def test_http_poll_helpers_support_stagey_matrix_shape(self):
+        self.assertEqual(MirageAmplifier.build_data_command("04", 1, [0x20, 0x40]), "04012040")
+        self.assertEqual(encode_output_address(64), 192)
+        self.assertEqual(decode_output_address(192), 64)
+
+        rows = MirageAmplifier.parse_response("04012040   \n030184\nignored\n")
+        self.assertEqual(rows[0].command, 4)
+        self.assertEqual(rows[0].output, 1)
+        self.assertEqual(rows[0].data, [0x20, 0x40])
+        self.assertEqual(rows[1].data, [0x84])
+        self.assertEqual(MirageAmplifier.decode_matrix_source(rows[1].data[0] & 0x7F), 7)
+
+        amp = FakeMirageAmplifier(source_base=0)
+        amp.assign_source_to_output(7, 1)
+        amp.assign_source_to_output(33, 1)
+        self.assertEqual(amp.sent, ["030104", "030121"])
 
 
 if __name__ == "__main__":

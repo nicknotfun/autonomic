@@ -1,18 +1,28 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
-from .base import AutonomicClient, ProtocolConnection
+from .base import ProtocolClient, ProtocolConnection
+from .exceptions import CommandError
 from .mms import MirageMediaServer
-from .models import BrowseResponse, CommandResponse, StatusSnapshot
+from .models import (
+    AutonomicOutput,
+    AutonomicSource,
+    BrowseResponse,
+    CommandResponse,
+    StatusSnapshot,
+    omit_disabled,
+    output_ref,
+    source_ref,
+)
 from .protocol import events_to_snapshot, format_command
 
 MRAD_PORT = 5006
-OutputRef = str | int
-SourceRef = str | int
+OutputRef = str | int | AutonomicOutput
+SourceRef = str | int | AutonomicSource
 
 
-class MirageAudioSystem(AutonomicClient):
+class MirageAudioSystem(ProtocolClient):
     """Client for MRAD/MAS zone, source, and zone-group control."""
 
     def __init__(
@@ -20,7 +30,7 @@ class MirageAudioSystem(AutonomicClient):
         host: str,
         port: int = MRAD_PORT,
         *,
-        timeout: float = 3.0,
+        timeout: float = 5.0,
         connection: ProtocolConnection | None = None,
         mms_client: MirageMediaServer | None = None,
         single_socket: bool = False,
@@ -83,23 +93,51 @@ class MirageAudioSystem(AutonomicClient):
     def browse_zone_groups(self, start: int | None = None, count: int | None = None) -> BrowseResponse:
         return self._browse("BrowseZoneGroups", start, count)
 
-    def list_outputs(self, start: int | None = None, count: int | None = None) -> BrowseResponse:
+    def list_outputs(
+        self,
+        start: int | None = None,
+        count: int | None = None,
+        *,
+        include_disabled: bool = False,
+    ) -> list[AutonomicOutput]:
         """Return all amplifier outputs.
 
         Autonomic's MRAD docs call physical outputs "zones"; this alias exposes
         the matrix vocabulary used by many control systems.
         """
 
-        return self.browse_all_zones(start, count)
+        outputs = [AutonomicOutput.from_browse_item(item, client=self) for item in self.browse_all_zones(start, count).items]
+        return omit_disabled(outputs, include_disabled=include_disabled)
 
-    def list_available_outputs(self, start: int | None = None, count: int | None = None) -> BrowseResponse:
-        return self.browse_zones(start, count)
+    def list_available_outputs(
+        self,
+        start: int | None = None,
+        count: int | None = None,
+        *,
+        include_disabled: bool = False,
+    ) -> list[AutonomicOutput]:
+        outputs = [AutonomicOutput.from_browse_item(item, client=self) for item in self.browse_zones(start, count).items]
+        return omit_disabled(outputs, include_disabled=include_disabled)
 
-    def list_sources(self, start: int | None = None, count: int | None = None) -> BrowseResponse:
-        return self.browse_all_sources(start, count)
+    def list_sources(
+        self,
+        start: int | None = None,
+        count: int | None = None,
+        *,
+        include_disabled: bool = False,
+    ) -> list[AutonomicSource]:
+        sources = [AutonomicSource.from_browse_item(item, client=self) for item in self.browse_all_sources(start, count).items]
+        return omit_disabled(sources, include_disabled=include_disabled)
 
-    def list_available_sources(self, start: int | None = None, count: int | None = None) -> BrowseResponse:
-        return self.browse_sources(start, count)
+    def list_available_sources(
+        self,
+        start: int | None = None,
+        count: int | None = None,
+        *,
+        include_disabled: bool = False,
+    ) -> list[AutonomicSource]:
+        sources = [AutonomicSource.from_browse_item(item, client=self) for item in self.browse_sources(start, count).items]
+        return omit_disabled(sources, include_disabled=include_disabled)
 
     def _browse(self, command: str, start: int | None = None, count: int | None = None) -> BrowseResponse:
         response = self.command(command, start, count)
@@ -108,7 +146,7 @@ class MirageAudioSystem(AutonomicClient):
         return response.payload
 
     def set_zone(self, zone: OutputRef) -> CommandResponse:
-        return self.command("SetZone", zone)
+        return self.command("SetZone", output_ref(zone))
 
     def set_output(self, output: OutputRef) -> CommandResponse:
         return self.set_zone(output)
@@ -120,21 +158,30 @@ class MirageAudioSystem(AutonomicClient):
         *,
         include_group: bool = False,
     ) -> CommandResponse:
+        resolved_source = source_ref(source_guid_or_name)
         if output is None:
-            return self.command("SetSource", source_guid_or_name)
-        return self.command("SetSource", source_guid_or_name, include_group, output)
+            return self.command("SetSource", resolved_source)
+        return self._with_output_power(output, lambda: self.command("SetSource", resolved_source, include_group, output_ref(output)))
 
     def volume(self, value: int, zone: OutputRef | None = None) -> CommandResponse:
-        return self.command("Volume", value, zone)
+        if zone is None:
+            return self.command("Volume", value)
+        return self._with_output_power(zone, lambda: self.command("Volume", value, output_ref(zone)))
 
     def volume_up(self, zone: OutputRef | None = None) -> CommandResponse:
-        return self.command("VolumeUp", zone)
+        if zone is None:
+            return self.command("VolumeUp")
+        return self._with_output_power(zone, lambda: self.command("VolumeUp", output_ref(zone)))
 
     def volume_down(self, zone: OutputRef | None = None) -> CommandResponse:
-        return self.command("VolumeDown", zone)
+        if zone is None:
+            return self.command("VolumeDown")
+        return self._with_output_power(zone, lambda: self.command("VolumeDown", output_ref(zone)))
 
     def mute(self, state: bool | str = "toggle", zone: OutputRef | None = None) -> CommandResponse:
-        return self.command("Mute", state, zone)
+        if zone is None:
+            return self.command("Mute", state)
+        return self._with_output_power(zone, lambda: self.command("Mute", state, output_ref(zone)))
 
     def set_output_volume(self, output: OutputRef, value: int) -> CommandResponse:
         return self.volume(value, output)
@@ -148,16 +195,17 @@ class MirageAudioSystem(AutonomicClient):
     def set_output_mute(self, output: OutputRef, state: bool | str = "toggle") -> CommandResponse:
         return self.mute(state, output)
 
-    def set_output_enabled(self, output: OutputRef, enabled: bool = True) -> CommandResponse:
-        """Power an output on or off through MRAD."""
+    def set_output_power(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse:
+        """Set the runtime power state for a zone/output.
 
-        return self.command("Power", "On" if enabled else "Off", output)
+        This is the MRAD zone `Power` command and is distinct from output
+        enablement or configuration-plane changes.
+        """
 
-    def enable_output(self, output: OutputRef) -> CommandResponse:
-        return self.set_output_enabled(output, True)
+        return self.command("Power", _toggle_state(is_on), output_ref(output))
 
-    def disable_output(self, output: OutputRef) -> CommandResponse:
-        return self.set_output_enabled(output, False)
+    def set_output_is_on(self, output: OutputRef, is_on: bool | str = True) -> CommandResponse:
+        return self.set_output_power(output, is_on)
 
     def assign_source_to_output(
         self,
@@ -181,7 +229,7 @@ class MirageAudioSystem(AutonomicClient):
         return responses
 
     def assign_source_to_all_outputs(self, source: SourceRef) -> list[CommandResponse]:
-        return self.assign_source_to_outputs(source, _refs_from_browse(self.list_outputs()))
+        return self.assign_source_to_outputs(source, self.list_outputs())
 
     def assign_output_sources(self, assignments: Mapping[OutputRef, SourceRef]) -> list[CommandResponse]:
         """Apply an output-to-source route table."""
@@ -195,43 +243,28 @@ class MirageAudioSystem(AutonomicClient):
         return self.assign_output_sources(assignments)
 
     def set_all_output_volume(self, value: int) -> list[CommandResponse]:
-        return [self.set_output_volume(output, value) for output in _refs_from_browse(self.list_outputs())]
+        return [self.set_output_volume(output, value) for output in self.list_outputs()]
 
     def mute_all_outputs(self, state: bool | str = True) -> list[CommandResponse]:
+        if _toggle_state(state) == "Off":
+            for output in self.list_outputs():
+                self._power_on_for_control(output)
         return [self.command("MuteAll", _toggle_state(state))]
 
-    def set_all_outputs_enabled(self, enabled: bool = True) -> list[CommandResponse]:
-        return [self.set_output_enabled(output, enabled) for output in _refs_from_browse(self.list_outputs())]
+    def _with_output_power(self, output: OutputRef, operation: Callable[[], CommandResponse]) -> CommandResponse:
+        self._power_on_for_control(output)
+        try:
+            return operation()
+        except CommandError as exc:
+            if not _is_power_off_error(exc):
+                raise
+            self.set_output_power(output, True)
+            return operation()
 
-    def enable_all_outputs(self) -> list[CommandResponse]:
-        return self.set_all_outputs_enabled(True)
-
-    def disable_all_outputs(self) -> CommandResponse:
-        return self.command("AllOff")
-
-    def party_mode(self, state: bool | str = "Toggle", output: OutputRef | None = None) -> CommandResponse:
-        """Set party-host mode on the active or specified output."""
-
-        return self.command("PartyMode", _toggle_state(state), output)
-
-    def set_zone_group(
-        self,
-        group_or_first_zone_guid: str,
-        member_zone_guids: Iterable[str],
-        source_guid: str | None = None,
-    ) -> CommandResponse:
-        members = ",".join(member_zone_guids)
-        return self.command("SetZoneGroup", group_or_first_zone_guid, members, source_guid)
-
-
-def _refs_from_browse(response: BrowseResponse) -> list[str]:
-    refs: list[str] = []
-    for item in response.items:
-        ref = item.guid or item.id or item.name
-        if ref is None:
-            raise ValueError(f"Browse item has no guid, id, or name: {item}")
-        refs.append(ref)
-    return refs
+    def _power_on_for_control(self, output: OutputRef) -> None:
+        if isinstance(output, AutonomicOutput) and output.is_on is True:
+            return
+        self.set_output_power(output, True)
 
 
 def _toggle_state(state: bool | str) -> str:
@@ -245,3 +278,7 @@ def _toggle_state(state: bool | str) -> str:
     if normalized == "toggle":
         return "Toggle"
     raise ValueError("state must be On, Off, Toggle, true, false, or bool")
+
+
+def _is_power_off_error(error: CommandError) -> bool:
+    return " is off" in str(error).lower()

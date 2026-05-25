@@ -10,7 +10,7 @@ from .protocol import frame_command
 class LineConnection:
     """Persistent CRLF-framed TCP connection used by the Autonomic socket APIs."""
 
-    def __init__(self, host: str, port: int, *, timeout: float = 3.0, encoding: str = "utf-8"):
+    def __init__(self, host: str, port: int, *, timeout: float = 5.0, encoding: str = "utf-8"):
         self.host = host
         self.port = port
         self.timeout = timeout
