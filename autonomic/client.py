@@ -38,18 +38,24 @@ DIRECT_AMPLIFIER_SOURCE_NAMES: dict[str, str] = {
     "s7": "Alpha",
     "s8": "Beta",
 }
-DIRECT_AMPLIFIER_LOCAL_SOURCES: tuple[tuple[int, str, str], ...] = (
-    (7, "Alpha", "000027fb-f8a9-f6be-a465-3d0fbee12977"),
-    (8, "Beta", "000027fc-f8a9-f6be-a465-3d0fbee12977"),
-)
-DIRECT_AMPLIFIER_REMOTE_SOURCES: tuple[tuple[int, str, str], ...] = (
-    (34, "Passthrough", "000027dc-df88-bd41-abbd-079c4e743694"),
-    (33, "Gamma", "000027e2-df88-bd41-abbd-079c4e743694"),
-    (32, "Delta", "000027e3-df88-bd41-abbd-079c4e743694"),
-)
-DIRECT_AMPLIFIER_LOCAL_SOURCE_BY_SLOT: dict[str, tuple[str, str]] = {
-    f"s{slot_number}": (name, guid) for slot_number, name, guid in DIRECT_AMPLIFIER_LOCAL_SOURCES
+DIRECT_AMPLIFIER_LOCAL_SOURCES_BY_DEVICE_ID: dict[str, tuple[tuple[int, str, str], ...]] = {
+    "00D4": (
+        (7, "Alpha", "000027fb-f8a9-f6be-a465-3d0fbee12977"),
+        (8, "Beta", "000027fc-f8a9-f6be-a465-3d0fbee12977"),
+    ),
+    "6012": (
+        (1, "Passthrough", "000027dc-df88-bd41-abbd-079c4e743694"),
+        (7, "Gamma", "000027e2-df88-bd41-abbd-079c4e743694"),
+        (8, "Delta", "000027e3-df88-bd41-abbd-079c4e743694"),
+    ),
 }
+DIRECT_AMPLIFIER_REMOTE_SOURCES: tuple[tuple[int, str, str], ...] = (
+    (32, "Delta", "000027e3-df88-bd41-abbd-079c4e743694"),
+    (33, "Gamma", "000027e2-df88-bd41-abbd-079c4e743694"),
+    (34, "Passthrough", "000027dc-df88-bd41-abbd-079c4e743694"),
+    (35, "Alpha", "000027fb-f8a9-f6be-a465-3d0fbee12977"),
+    (36, "Beta", "000027fc-f8a9-f6be-a465-3d0fbee12977"),
+)
 DIRECT_AMPLIFIER_REMOTE_SOURCE_BY_ID: dict[str, tuple[str, str]] = {
     str(source_id_value): (name, guid) for source_id_value, name, guid in DIRECT_AMPLIFIER_REMOTE_SOURCES
 }
@@ -82,6 +88,7 @@ class AutonomicClient:
         self._detected_mode: DetectedMode | None = None if normalized_mode == "auto" else normalized_mode
         self._selected_output: OutputRef | None = None
         self._initialized = False
+        self._amplifier_device_id: str | None = None
         self.media = MirageMediaServer(host, media_port, timeout=timeout)
         self.audio = MirageAudioSystem(host, mrad_port, timeout=timeout)
         self.amplifier = MirageAmplifier(
@@ -109,7 +116,7 @@ class AutonomicClient:
             self.media.initialize(host_hint=host_hint, instance=instance)
             self.audio.initialize(host_hint=host_hint)
         else:
-            self.amplifier.get_device_id()
+            self._amplifier_device_id = self.amplifier.get_device_id()
         self._initialized = True
 
     def list_zones(self, *, include_disabled: bool = False, include_status: bool = True) -> list[AutonomicOutput]:
@@ -405,10 +412,17 @@ class AutonomicClient:
 
         slot_name = source_name or self._direct_source_slot_name(source_id_value)
         if slot_name:
-            local_definition = DIRECT_AMPLIFIER_LOCAL_SOURCE_BY_SLOT.get(slot_name.strip().lower())
+            local_definition = self._direct_local_source_by_slot().get(slot_name.strip().lower())
             if local_definition is not None:
                 return local_definition
         return None
+
+    def _direct_local_source_by_slot(self) -> dict[str, tuple[str, str]]:
+        definitions = DIRECT_AMPLIFIER_LOCAL_SOURCES_BY_DEVICE_ID.get(
+            (self._amplifier_device_id or "").upper(),
+            DIRECT_AMPLIFIER_LOCAL_SOURCES_BY_DEVICE_ID["00D4"],
+        )
+        return {f"s{slot_number}": (name, guid) for slot_number, name, guid in definitions}
 
     def _direct_remote_sources(self, *, existing_ids: set[str | None]) -> list[AutonomicSource]:
         sources: list[AutonomicSource] = []

@@ -251,7 +251,7 @@ class AutonomicClientTests(unittest.TestCase):
         outputs = client.list_outputs()
         sources = client.list_sources()
         self.assertEqual(len(outputs), 8)
-        self.assertEqual(len(sources), 15)
+        self.assertEqual(len(sources), 17)
         self.assertIsInstance(outputs[0], AutonomicOutput)
         self.assertIsInstance(sources[6], AutonomicSource)
         self.assertEqual([output.name for output in outputs], [
@@ -266,12 +266,14 @@ class AutonomicClientTests(unittest.TestCase):
         ])
         self.assertEqual(sources[6].name, "Alpha")
         self.assertEqual(sources[7].name, "Beta")
-        self.assertEqual(sources[12].name, "Passthrough")
+        self.assertEqual(sources[12].name, "Delta")
         self.assertEqual(sources[13].name, "Gamma")
-        self.assertEqual(sources[14].name, "Delta")
+        self.assertEqual(sources[14].name, "Passthrough")
+        self.assertEqual(sources[15].name, "Alpha")
+        self.assertEqual(sources[16].name, "Beta")
         self.assertEqual(sources[6].attributes["address"], "02")
         self.assertEqual(sources[11].attributes["address"], "0B")
-        self.assertEqual(sources[12].attributes["address"], "22")
+        self.assertEqual(sources[14].attributes["address"], "22")
         self.assertEqual(client.source_by_name("Alpha").id, "6")
         self.assertEqual(client.source_by_name("Passthrough").id, "34")
         self.assertEqual(client.source_by_name("Gamma").id, "33")
@@ -322,6 +324,27 @@ class AutonomicClientTests(unittest.TestCase):
 
         with self.assertRaises(AutonomicError):
             client.play()
+
+    def test_unified_client_applies_device_specific_direct_source_names(self):
+        client = AutonomicClient(
+            "amp.local",
+            mode="amplifier",
+            auto_initialize=False,
+            amplifier_source_count=12,
+            amplifier_source_base=0,
+        )
+        client._amplifier_device_id = "6012"
+
+        sources = client.list_sources()
+
+        self.assertEqual(sources[0].name, "Passthrough")
+        self.assertEqual(sources[0].guid, "000027dc-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(sources[6].name, "Gamma")
+        self.assertEqual(sources[6].guid, "000027e2-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(sources[7].name, "Delta")
+        self.assertEqual(sources[7].guid, "000027e3-df88-bd41-abbd-079c4e743694")
+        self.assertEqual(client.source_by_name("Alpha").id, "35")
+        self.assertEqual(client.source_by_name("Beta").id, "36")
 
     def test_unified_client_reads_direct_amplifier_output_status(self):
         client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False, amplifier_output_count=2)

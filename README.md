@@ -763,11 +763,16 @@ identified with preferred names and GUIDs so they can be selected by name:
 
 | Direct source | Presented name | GUID |
 | --- | --- | --- |
-| `S7` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
-| `S8` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
-| Remote slot `02` / selector `0x22` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
-| Remote slot `01` / selector `0x21` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Device `00D4` local `S7` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
+| Device `00D4` local `S8` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
+| Device `6012` local `S1` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
+| Device `6012` local `S7` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Device `6012` local `S8` | Delta | `000027e3-df88-bd41-abbd-079c4e743694` |
 | Remote slot `00` / selector `0x20` | Delta | `000027e3-df88-bd41-abbd-079c4e743694` |
+| Remote slot `01` / selector `0x21` | Gamma | `000027e2-df88-bd41-abbd-079c4e743694` |
+| Remote slot `02` / selector `0x22` | Passthrough | `000027dc-df88-bd41-abbd-079c4e743694` |
+| Remote slot `03` / selector `0x23` | Alpha | `000027fb-f8a9-f6be-a465-3d0fbee12977` |
+| Remote slot `04` / selector `0x24` | Beta | `000027fc-f8a9-f6be-a465-3d0fbee12977` |
 
 The lower-level `MirageAmplifier` client still exposes protocol slot names.
 Direct amplifier outputs are presented with the local house names:
