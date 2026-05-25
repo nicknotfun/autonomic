@@ -259,10 +259,10 @@ class MirageAmplifier:
         return source + 1
 
     def _source_name_for_instance(self, source_id_value: int) -> str:
-        if self.source_base == 0:
-            return f"S{source_id_value + 1}"
         if source_id_value >= 0x20:
             return f"Remote {source_id_value - 0x20 + 1}"
+        if self.source_base == 0:
+            return f"S{source_id_value + 1}"
         return f"S{source_id_value}"
 
     def send_data_command(self, command: int | str, output: int | str, data: int | str | Iterable[int | str] = 0) -> str:
@@ -467,7 +467,7 @@ class MirageAmplifier:
                     update.setdefault("is_on", True)
                     attrs.setdefault("PowerOn", "true")
             elif row.command == 0x04:
-                raw_volume = row.data[-1]
+                raw_volume = row.data[0]
                 volume = _volume_from_raw(raw_volume)
                 update["volume"] = volume
                 attrs["Volume"] = str(volume)

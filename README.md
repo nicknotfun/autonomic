@@ -745,6 +745,18 @@ amp.assign_source_to_output(source=7, output=1)   # eighth local input
 amp.assign_source_to_output(source=33, output=1)  # extended matrix source
 ```
 
+The unified client exposes the same direct amplifier shape options:
+
+```python
+client = AutonomicClient(
+    "192.168.1.60",
+    mode="amplifier",
+    amplifier_output_count=16,
+    amplifier_source_count=12,
+    amplifier_source_base=0,
+)
+```
+
 Examples:
 
 ```text

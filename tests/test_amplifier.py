@@ -103,8 +103,8 @@ class MirageAmplifierDeviceInfoTests(unittest.TestCase):
             responses={
                 "01FF": "010101\n010200",
                 "02FF": "020101\n020200",
-                "03FF": "030102\n030204",
-                "04FF": "040150\n040240",
+                "03FF": "030102\n0302A2",
+                "04FF": "04015064\n040240",
             },
         )
 
@@ -119,8 +119,8 @@ class MirageAmplifierDeviceInfoTests(unittest.TestCase):
         self.assertEqual(outputs[0].volume, 50)
         self.assertFalse(outputs[1].is_on)
         self.assertTrue(outputs[1].muted)
-        self.assertEqual(outputs[1].source_id, "8")
-        self.assertEqual(outputs[1].source_name, "S8")
+        self.assertEqual(outputs[1].source_id, "34")
+        self.assertEqual(outputs[1].source_name, "Remote 3")
         self.assertEqual(outputs[1].volume, 40)
 
     def test_direct_output_status_polling_can_be_disabled(self):

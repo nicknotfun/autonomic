@@ -198,7 +198,13 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertFalse(hasattr(output, "enable"))
 
     def test_unified_client_supports_direct_amplifier_mode_with_objects(self):
-        client = AutonomicClient("amp.local", mode="amplifier", auto_initialize=False)
+        client = AutonomicClient(
+            "amp.local",
+            mode="amplifier",
+            auto_initialize=False,
+            amplifier_source_count=12,
+            amplifier_source_base=0,
+        )
         sent: list[str] = []
 
         def fake_send_commands(commands, *, timeout=None) -> str:
@@ -235,9 +241,11 @@ class AutonomicClientTests(unittest.TestCase):
         outputs = client.list_outputs()
         sources = client.list_sources()
         self.assertEqual(len(outputs), 8)
+        self.assertEqual(len(sources), 12)
         self.assertIsInstance(outputs[0], AutonomicOutput)
         self.assertIsInstance(sources[6], AutonomicSource)
         self.assertEqual(sources[6].attributes["address"], "02")
+        self.assertEqual(sources[11].attributes["address"], "0B")
 
         sent.clear()
         client.amplifier.send_commands = fake_send_commands  # type: ignore[method-assign]
@@ -286,8 +294,8 @@ class AutonomicClientTests(unittest.TestCase):
             responses = {
                 "01FF": "010101\n010200",
                 "02FF": "020101\n020200",
-                "03FF": "030102\n030204",
-                "04FF": "040150\n040240",
+                "03FF": "030102\n0302A2",
+                "04FF": "04015064\n040240",
             }
             return "\n".join(responses.get(command, "") for command in normalized)
 
@@ -304,7 +312,7 @@ class AutonomicClientTests(unittest.TestCase):
             [(output.is_on, output.muted, output.volume, output.source_name) for output in outputs],
             [
                 (True, False, 50, "S7"),
-                (False, True, 40, "S8"),
+                (False, True, 40, "Remote 3"),
             ],
         )
 

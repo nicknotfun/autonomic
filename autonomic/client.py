@@ -35,6 +35,7 @@ class AutonomicClient:
         mode: ClientMode = "auto",
         amplifier_output_count: int = 8,
         amplifier_source_count: int = 8,
+        amplifier_source_base: int = 1,
         auto_initialize: bool = True,
         host_hint: str | None = None,
         instance: str | None = None,
@@ -55,6 +56,7 @@ class AutonomicClient:
             timeout=timeout,
             output_count=amplifier_output_count,
             source_count=amplifier_source_count,
+            source_base=amplifier_source_base,
         )
         if auto_initialize:
             self.initialize(host_hint=host_hint, instance=instance)
