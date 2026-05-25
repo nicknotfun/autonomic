@@ -17,7 +17,7 @@ from .exceptions import (
     NotConnectedError,
     ProtocolError,
 )
-from .client import DEFAULT_SOURCE_ALIASES, AutonomicClient
+from .client import DEFAULT_HOST, DEFAULT_SOURCE_ALIASES, AutonomicClient
 from .mms import MMS_PORT, MirageMediaServer
 from .models import (
     AutonomicOutput,
@@ -47,6 +47,7 @@ __all__ = [
     "CommandError",
     "CommandResponse",
     "ConnectionClosedError",
+    "DEFAULT_HOST",
     "DEFAULT_SOURCE_ALIASES",
     "Event",
     "LineConnection",

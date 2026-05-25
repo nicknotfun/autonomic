@@ -1013,9 +1013,10 @@ outputs[0].unmute()
 
 Use for seamless control when the device may be either a MAS/MRAD system or a
 standalone direct amplifier. `AutonomicClient` auto-detects and initializes
-itself during construction. Use `auto_initialize=False` only when building an
-offline object for tests or when you need to patch/customize low-level clients
-before the first protocol call.
+itself during construction. If no host is provided, it connects to
+`10.1.0.200`. Use `auto_initialize=False` only when building an offline object
+for tests or when you need to patch/customize low-level clients before the
+first protocol call.
 
 ```python
 from autonomic import AutonomicClient

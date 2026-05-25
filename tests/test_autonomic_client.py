@@ -9,6 +9,7 @@ from autonomic import (
     AutonomicOutput,
     AutonomicOutputGroup,
     AutonomicSource,
+    DEFAULT_HOST,
     MirageAmplifier,
     MirageAudioSystem,
 )
@@ -35,6 +36,15 @@ class AutonomicClientTests(unittest.TestCase):
         self.assertFalse(hasattr(client, "enable_all_outputs"))
         self.assertFalse(hasattr(client, "disable_all_outputs"))
         self.assertFalse(client._initialized)
+
+    def test_unified_client_defaults_to_primary_direct_amp_host(self):
+        client = AutonomicClient(auto_initialize=False)
+
+        self.assertEqual(DEFAULT_HOST, "10.1.0.200")
+        self.assertEqual(client.host, "10.1.0.200")
+        self.assertEqual(client.media.host, "10.1.0.200")
+        self.assertEqual(client.audio.host, "10.1.0.200")
+        self.assertEqual(client.amplifier.host, "10.1.0.200")
 
     def test_constructor_auto_initializes_by_default(self):
         with patch.object(MirageAmplifier, "get_device_id", return_value="00D4") as get_device_id:

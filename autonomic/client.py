@@ -13,6 +13,7 @@ from .mrad import MRAD_PORT, MirageAudioSystem, OutputRef, SourceRef
 
 ClientMode = Literal["auto", "mrad", "mas", "amplifier", "amp", "direct"]
 DetectedMode = Literal["mrad", "amplifier"]
+DEFAULT_HOST = "10.1.0.200"
 DEFAULT_SOURCE_ALIASES: dict[str, str] = {
     "000027fb-f8a9-f6be-a465-3d0fbee12977": "Alpha",
     "000027fc-f8a9-f6be-a465-3d0fbee12977": "Beta",
@@ -59,7 +60,7 @@ class AutonomicClient:
 
     def __init__(
         self,
-        host: str,
+        host: str = DEFAULT_HOST,
         *,
         media_port: int = MMS_PORT,
         mrad_port: int = MRAD_PORT,
