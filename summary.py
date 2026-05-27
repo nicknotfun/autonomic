@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
+# CLI helper for printing direct amplifier zone and source summaries.
 from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from typing import TypeAlias, TypeVar
 
 from autonomic import AutonomicClient, AutonomicOutput, AutonomicSource
-from autonomic.amplifier import AMPLIFIER_RAW_MAX_VOLUME
+from autonomic.amplifier_codec import AMPLIFIER_RAW_MAX_VOLUME
+from autonomic.amplifier_types import AmplifierResponse
 
 
 DEFAULT_HOSTS = ("10.1.0.200", "10.1.0.201")
+StatusValue: TypeAlias = str | int | float | bool | None
+OutputStatuses: TypeAlias = dict[str, dict[str, StatusValue]]
+TAutonomicSummaryItem = TypeVar("TAutonomicSummaryItem", AutonomicSource, AutonomicOutput)
 
 
 def main() -> None:
@@ -20,25 +26,6 @@ def main() -> None:
         nargs="*",
         default=DEFAULT_HOSTS,
         help="Autonomic amplifier IPs or hostnames. Defaults to 10.1.0.200 and 10.1.0.201.",
-    )
-    parser.add_argument(
-        "--outputs",
-        type=int,
-        default=16,
-        help="Direct amplifier output count. Defaults to 16.",
-    )
-    parser.add_argument(
-        "--sources",
-        type=int,
-        default=12,
-        help="Direct amplifier local source count. Defaults to 12.",
-    )
-    parser.add_argument(
-        "--source-base",
-        type=int,
-        choices=(0, 1),
-        default=0,
-        help="Direct amplifier local source numbering base. Defaults to 0.",
     )
     parser.add_argument(
         "--timeout",
@@ -58,9 +45,6 @@ def main() -> None:
             print()
         print_host_summary(
             host,
-            output_count=args.outputs,
-            source_count=args.sources,
-            source_base=args.source_base,
             timeout=args.timeout,
             raw_status=args.raw_status,
         )
@@ -69,9 +53,6 @@ def main() -> None:
 def print_host_summary(
     host: str,
     *,
-    output_count: int,
-    source_count: int,
-    source_base: int,
     timeout: float,
     raw_status: bool,
 ) -> None:
@@ -80,9 +61,6 @@ def print_host_summary(
             host,
             mode="amplifier",
             timeout=timeout,
-            amplifier_output_count=output_count,
-            amplifier_source_count=source_count,
-            amplifier_source_base=source_base,
         )
         sources = client.list_sources(include_disabled=True)
         outputs = client.list_outputs(include_disabled=True, include_status=False)
@@ -102,8 +80,8 @@ def print_host_summary(
         print(f"  {_output_line(output, output_status.get(str(output.id), {}), raw_status=raw_status)}")
 
 
-def _read_output_status(client: AutonomicClient) -> dict[str, dict[str, object]]:
-    statuses: dict[str, dict[str, object]] = {}
+def _read_output_status(client: AutonomicClient) -> OutputStatuses:
+    statuses: OutputStatuses = {}
     source_names = {str(source.id): source.name for source in client.list_sources(include_disabled=True)}
 
     for command in ("01FF", "02FF", "03FF", "04FF"):
@@ -131,8 +109,8 @@ def _read_output_status(client: AutonomicClient) -> dict[str, dict[str, object]]
 def _merge_status_row(
     client: AutonomicClient,
     source_names: dict[str, str | None],
-    statuses: dict[str, dict[str, object]],
-    row: object,
+    statuses: OutputStatuses,
+    row: AmplifierResponse,
 ) -> None:
     if row.output is None or row.output == 0xFF or not row.data:
         return
@@ -156,7 +134,7 @@ def _merge_status_row(
         status["volume"] = _volume_from_raw(row.data[0])
 
 
-def _sort_by_numeric_id(items: Iterable[AutonomicSource | AutonomicOutput]) -> list[AutonomicSource | AutonomicOutput]:
+def _sort_by_numeric_id(items: Iterable[TAutonomicSummaryItem]) -> list[TAutonomicSummaryItem]:
     return sorted(items, key=lambda item: _numeric_id(item.id))
 
 
@@ -185,7 +163,7 @@ def _source_line(source: AutonomicSource) -> str:
     return f"{str(source.id):>2} {source.name}{suffix}"
 
 
-def _output_line(output: AutonomicOutput, status: dict[str, object], *, raw_status: bool) -> str:
+def _output_line(output: AutonomicOutput, status: dict[str, StatusValue], *, raw_status: bool) -> str:
     line = (
         f"{str(output.id):>2} {str(output.name):<12} "
         f"on={status.get('is_on')} muted={status.get('muted')} volume={status.get('volume')} "

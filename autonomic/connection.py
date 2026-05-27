@@ -1,3 +1,4 @@
+# Socket-backed line connection used by the Autonomic text protocols.
 from __future__ import annotations
 
 import socket
@@ -8,13 +9,22 @@ from .protocol import frame_command
 
 
 class LineConnection:
-    """Persistent CRLF-framed TCP connection used by the Autonomic socket APIs."""
+    """Persistent command socket used by the Autonomic line-style APIs."""
 
-    def __init__(self, host: str, port: int, *, timeout: float = 5.0, encoding: str = "utf-8"):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        timeout: float = 5.0,
+        encoding: str = "utf-8",
+        response_delimiter: bytes = b"\n",
+    ):
         self.host = host
         self.port = port
         self.timeout = timeout
         self.encoding = encoding
+        self.response_delimiter = _normalize_delimiter(response_delimiter)
         self._sock: socket.socket | None = None
         self._buffer = bytearray()
 
@@ -42,6 +52,9 @@ class LineConnection:
             raise NotConnectedError("Socket is not connected")
         self._sock.sendall(frame_command(command))
 
+    def set_response_delimiter(self, delimiter: bytes) -> None:
+        self.response_delimiter = _normalize_delimiter(delimiter)
+
     def read_line(self, timeout: float | None = None) -> str:
         if self._sock is None:
             raise NotConnectedError("Socket is not connected")
@@ -50,7 +63,8 @@ class LineConnection:
         if timeout is not None:
             self._sock.settimeout(timeout)
         try:
-            while b"\n" not in self._buffer:
+            delimiter = self.response_delimiter
+            while delimiter not in self._buffer:
                 try:
                     chunk = self._sock.recv(4096)
                 except socket.timeout as exc:
@@ -61,13 +75,15 @@ class LineConnection:
                     raise ConnectionClosedError("Socket closed while waiting for a protocol line")
                 self._buffer.extend(chunk)
 
-            if b"\n" in self._buffer:
-                raw, _, rest = self._buffer.partition(b"\n")
+            raw: bytes
+            if delimiter in self._buffer:
+                raw_buffer, _, rest = self._buffer.partition(delimiter)
+                raw = bytes(raw_buffer)
                 self._buffer = bytearray(rest)
             else:
                 raw = bytes(self._buffer)
                 self._buffer.clear()
-            return raw.decode(self.encoding, errors="replace").rstrip("\r")
+            return raw.decode(self.encoding, errors="replace").rstrip("\r\n")
         finally:
             if timeout is not None and self._sock is not None:
                 self._sock.settimeout(previous_timeout)
@@ -83,3 +99,9 @@ class LineConnection:
         traceback: TracebackType | None,
     ) -> None:
         self.close()
+
+
+def _normalize_delimiter(delimiter: bytes) -> bytes:
+    if not delimiter:
+        raise ValueError("response delimiter must not be empty")
+    return bytes(delimiter)

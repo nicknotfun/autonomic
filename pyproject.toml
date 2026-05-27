@@ -1,3 +1,4 @@
+# Build metadata and test configuration for the Autonomic Python SDK.
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -5,12 +6,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autonomic-sdk"
 version = "0.1.0"
-description = "Python SDK for Autonomic Mirage Media Server, MRAD/MAS, and direct amplifier control APIs"
+description = "Python SDK for Autonomic MRAD/MAS and direct amplifier control APIs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Autonomic SDK contributors"}]
-keywords = ["autonomic", "mirage", "mrad", "mms", "media-server", "amplifier"]
+keywords = ["autonomic", "mirage", "mrad", "mas", "amplifier"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,11 +26,18 @@ classifiers = [
 dependencies = ["pydantic>=2.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["mypy>=1.10", "pytest>=8.0"]
+
+[tool.mypy]
+strict = true
+files = ["autonomic", "summary.py", "examples"]
 
 [tool.setuptools.packages.find]
 include = ["autonomic", "autonomic.*"]
 
+[tool.setuptools.package-data]
+autonomic = ["*.json", "py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "tests"]

@@ -1,13 +1,19 @@
+# Optional live-device smoke tests for MRAD and direct amplifier backends.
 from __future__ import annotations
 
 import os
 import socket
 import unittest
 
-from autonomic import AutonomicClient, MirageAmplifier, MirageAudioSystem, MirageMediaServer
+from autonomic import AutonomicClient, MirageAmplifier, MirageAudioSystem
 
 
 HOST = os.environ.get("AUTONOMIC_TEST_HOST")
+HOSTS = tuple(
+    host.strip()
+    for host in os.environ.get("AUTONOMIC_TEST_HOSTS", "").split(",")
+    if host.strip()
+)
 
 
 @unittest.skipUnless(HOST, "set AUTONOMIC_TEST_HOST to run live Autonomic device tests")
@@ -63,32 +69,55 @@ class LiveAutonomicDeviceTests(unittest.TestCase):
             if "Mute" in output_state:
                 mas.set_output_mute(output, output_state["Mute"])
 
-    def test_live_mms_browse_and_single_socket_mrad(self):
-        assert HOST is not None
-        if not _port_open(HOST, 5004):
-            self.skipTest("MMS port 5004 is not available on this device")
-
-        with MirageMediaServer(HOST) as mms:
-            mms.set_client_type("PythonSDKLiveTest")
-            mms.set_encoding(65001)
-            mms.set_xml_mode("Lists")
-
-            albums = mms.browse_albums(1, 1)
-            self.assertGreaterEqual(len(albums.items), 0)
-            self.assertEqual(albums.kind, "Albums")
-
-            mms.set_option("Supports_SingleSocket", True)
-            single_socket_mrad = MirageAudioSystem(HOST, mms_client=mms, single_socket=True)
-            outputs = single_socket_mrad.list_outputs()
-            self.assertGreater(len(outputs), 0)
-
     def test_live_amplifier_device_id_read(self):
         assert HOST is not None
         if not _port_open(HOST, 17037):
             self.skipTest("Amplifier port 17037 is not available on this device")
 
-        device_id = MirageAmplifier(HOST, timeout=2).get_device_id()
+        amplifier = MirageAmplifier(HOST, timeout=2)
+        device_id = amplifier.get_device_id()
+        devices = amplifier.discover_devices()
+        sources = amplifier.list_sources()
+        outputs = amplifier.list_outputs()
+        preset_group_map = amplifier.query_preset_group_map()
+        preset_group = amplifier.query_preset_group(1)
+        source_delays = amplifier.query_output_source_delays(1)
+        device_status_info = []
+        device_link_info = []
+        device_state_info = []
+        for device in devices:
+            device_status_info.extend(amplifier.query_device_status_info(device.amp_id))
+            device_link_info.extend(amplifier.query_device_links(device.amp_id))
+            device_state_info.extend(amplifier.query_device_state_info(device.amp_id))
+        reset_response = amplifier.reset_all_to_defaults()
+
         self.assertRegex(device_id, r"^[0-9A-F]{4}$")
+        self.assertTrue(any(device.amp_id == device_id for device in devices))
+        self.assertGreater(len(sources), 0)
+        self.assertGreater(len(outputs), 0)
+        self.assertIsNotNone(preset_group_map)
+        self.assertTrue(preset_group is None or preset_group.slot == 1)
+        self.assertIsInstance(source_delays, list)
+        self.assertIsInstance(device_status_info, list)
+        self.assertIsInstance(device_link_info, list)
+        self.assertIsInstance(device_state_info, list)
+        self.assertIsInstance(reset_response, str)
+
+
+@unittest.skipUnless(len(HOSTS) >= 2, "set AUTONOMIC_TEST_HOSTS to run multi-device live Autonomic tests")
+class LiveAutonomicMultiDeviceTests(unittest.TestCase):
+    def test_live_multi_direct_client_lists_device_qualified_sources_and_outputs(self):
+        primary = HOSTS[0]
+        if not all(_port_open(host, 17037) for host in HOSTS[:2]):
+            self.skipTest("Amplifier port 17037 is not available on both devices")
+
+        with AutonomicClient(primary, mode="amplifier") as client:
+            outputs = client.list_outputs(include_status=False)
+            sources = client.list_sources(include_disabled=True)
+
+        self.assertTrue(any(output.attributes.get("deviceId") for output in outputs))
+        self.assertTrue(any(source.id and ":" in source.id for source in sources))
+        self.assertGreaterEqual(len(outputs), 2)
 
 
 def _port_open(host: str, port: int) -> bool:

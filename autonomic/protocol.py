@@ -1,14 +1,16 @@
+# Shared line-protocol formatting, parsing, and XML list helpers.
 from __future__ import annotations
 
 import re
 import shlex
 import xml.etree.ElementTree as ET
-from urllib.parse import urlencode, urljoin
+from typing import TypeAlias
 
 from .exceptions import ProtocolError
-from .models import BrowseItem, BrowseResponse, Event
+from .protocol_types import BrowseItem, BrowseResponse, Event
 
 CRLF = "\r\n"
+CommandArg: TypeAlias = str | int | float | bool | None
 
 _EVENT_RE = re.compile(r"^(?:(?P<namespace>MRAD)\.)?(?P<reason>StateChanged|ReportState)\s+(?P<source>\S+)\s+(?P<name>[^=\s]+)=(?P<value>.*)$")
 _BEGIN_RE = re.compile(r"^Begin(?P<kind>\w+)(?P<rest>.*)$", re.IGNORECASE)
@@ -21,7 +23,7 @@ _BANNER_PREFIXES = (
 )
 
 
-def quote_arg(value: object) -> str:
+def quote_arg(value: CommandArg) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if value is None:
@@ -41,13 +43,13 @@ def quote_arg(value: object) -> str:
     return f'"{escaped}"'
 
 
-def format_command(name: str, *args: object) -> str:
+def format_command(name: str, *args: CommandArg) -> str:
     rendered = [name]
     rendered.extend(quote_arg(arg) for arg in args if arg is not None)
     return " ".join(part for part in rendered if part != "")
 
 
-def format_assignment(name: str, value: object) -> str:
+def format_assignment(name: str, value: CommandArg) -> str:
     rendered = quote_arg(value)
     if isinstance(value, str) and name.lower() == "search" and not rendered.startswith('"'):
         rendered = '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -143,7 +145,7 @@ def is_legacy_list_end(line: str) -> bool:
 
 def is_xml_response(line: str) -> bool:
     stripped = line.strip()
-    return stripped.startswith("<") and stripped.endswith(">")
+    return bool(re.match(r"^<[/A-Za-z_][A-Za-z0-9_.:-]*(?:\s|/?>)", stripped))
 
 
 def is_banner_line(line: str) -> bool:
@@ -159,37 +161,6 @@ def events_to_snapshot(events: list[Event]) -> dict[str, dict[str, str]]:
     for event in events:
         snapshot.setdefault(event.source, {})[event.name] = event.value
     return snapshot
-
-
-def album_art_url(
-    base_web_url: str,
-    *,
-    guid: str | None = None,
-    instance: str | None = None,
-    width: int | None = None,
-    height: int | None = None,
-    constrain: bool | None = None,
-    fmt: str | None = None,
-    endpoint: str = "GetArt",
-    **extra: object,
-) -> str:
-    query: dict[str, object] = {}
-    if guid is not None:
-        query["guid"] = guid
-    if instance is not None:
-        query["instance"] = instance
-    if width is not None:
-        query["w"] = width
-    if height is not None:
-        query["h"] = height
-    if constrain is not None:
-        query["c"] = 1 if constrain else 0
-    if fmt is not None:
-        query["fmt"] = fmt
-    query.update({key: value for key, value in extra.items() if value is not None})
-
-    base = base_web_url.rstrip("/") + "/"
-    return urljoin(base, endpoint.lstrip("/")) + ("?" + urlencode(query) if query else "")
 
 
 def _parse_attribute_tail(text: str) -> dict[str, str]:

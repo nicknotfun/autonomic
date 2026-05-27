@@ -1,0 +1,35 @@
+{
+  "_comment": "Default static mappings for the bundled two-amplifier stack; layout values are inferred from model_byte.",
+  "source_aliases": {},
+  "direct_amplifier": {
+    "devices": [
+      {
+        "device_id": "00D4",
+        "host": "10.1.0.200",
+        "model_byte": "0xB0"
+      },
+      {
+        "device_id": "6012",
+        "host": "10.1.0.201",
+        "model_byte": "0xE9"
+      }
+    ],
+    "output_names": {
+      "1": "Kitchen",
+      "2": "Dining",
+      "3": "Living",
+      "4": "Master",
+      "5": "Bathroom",
+      "6": "Foyer",
+      "7": "Sitting",
+      "8": "Passthrough",
+      "9": "Grill",
+      "10": "Patio West",
+      "11": "Patio East",
+      "12": "Pool"
+    },
+    "source_name_aliases": {},
+    "local_sources_by_device_id": {},
+    "remote_sources": []
+  }
+}

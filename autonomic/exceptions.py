@@ -1,3 +1,4 @@
+# Exception hierarchy for transport, protocol, and command failures.
 from __future__ import annotations
 
 
@@ -23,4 +24,3 @@ class ProtocolError(AutonomicError, ValueError):
 
 class CommandError(AutonomicError):
     """Raised when a command response indicates failure."""
-

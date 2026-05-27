@@ -1,2 +1,5 @@
+# Local development and build artifacts ignored by this repository.
 __pycache__/
 *.pyc
+.venv
+*.egg-info/

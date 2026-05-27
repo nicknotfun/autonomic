@@ -1,3 +1,4 @@
+# Example CLI for assigning every discovered output to one source.
 from __future__ import annotations
 
 import argparse

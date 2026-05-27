@@ -1,3 +1,4 @@
+# Shared scripted connection helpers for protocol and client unit tests.
 from __future__ import annotations
 
 from collections import defaultdict, deque
@@ -13,6 +14,7 @@ class ScriptedConnection:
         self.default = list(default or ["OK"])
         self._pending: deque[str] = deque()
         self.calls = defaultdict(int)
+        self.response_delimiter = b"\n"
 
     def connect(self) -> None:
         self.connected = True
@@ -28,6 +30,9 @@ class ScriptedConnection:
             self._pending.extend(self.default)
         else:
             self._pending.extend(response)
+
+    def set_response_delimiter(self, delimiter: bytes) -> None:
+        self.response_delimiter = bytes(delimiter)
 
     def read_line(self, timeout: float | None = None) -> str:
         if not self._pending:
