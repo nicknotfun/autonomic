@@ -14,15 +14,9 @@ def main() -> None:
         nargs="?",
         help="Source id, GUID, or name. Defaults to the first source returned by the device.",
     )
-    parser.add_argument(
-        "--mode",
-        choices=("auto", "mrad", "mas", "amplifier", "amp", "direct"),
-        default="auto",
-        help="Control mode. Defaults to auto-detection.",
-    )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host, mode=args.mode) as client:
+    with AutonomicClient(args.host) as client:
         source = args.source if args.source is not None else client.list_sources()[0]
         client.all_outputs().assign(source)
 

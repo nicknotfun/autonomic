@@ -16,7 +16,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host, mode="amplifier") as client:
+    with AutonomicClient(args.host) as client:
         response = client.rename_sources_to_low_level_input_labels()
 
     if response:

@@ -20,15 +20,9 @@ def main() -> None:
         default="10.1.0.200",
         help="Autonomic device hostname or IP address. Defaults to 10.1.0.200.",
     )
-    parser.add_argument(
-        "--mode",
-        choices=("auto", "mrad", "mas", "amplifier", "amp", "direct"),
-        default="auto",
-        help="Control mode. Defaults to auto-detection.",
-    )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host, mode=args.mode) as client:
+    with AutonomicClient(args.host) as client:
         snapshot: dict[str, SnapshotValue] = {
             "host": args.host,
             "mode": client.detect_mode(),
@@ -59,11 +53,9 @@ def _output_record(output: AutonomicOutput) -> StatusRecord:
         "kind": output.kind,
         "address": output.address,
         "disabled": output.disabled,
-        "device_type": output.device_type,
         "is_on": output.is_on,
         "muted": output.muted,
         "volume": output.volume,
-        "min_volume": output.min_volume,
         "max_volume": output.max_volume,
         "bass": output.bass,
         "treble": output.treble,
@@ -71,12 +63,9 @@ def _output_record(output: AutonomicOutput) -> StatusRecord:
         "gain": output.gain,
         "delay_ms": output.delay_ms,
         "loudness": output.loudness,
-        "mono_downmix": output.mono_downmix,
-        "power_on_volume": output.power_on_volume,
         "source_id": output.source_id,
         "source_guid": output.source_guid,
         "source_name": output.source_name,
-        "qualified_source_name": output.qualified_source_name,
         "attributes": output.attributes,
     }
 

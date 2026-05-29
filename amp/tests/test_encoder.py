@@ -1,0 +1,183 @@
+from dataclasses import dataclass
+from types import SimpleNamespace
+from uuid import UUID
+
+import pytest
+
+from amp.byte_utils import HexBytes
+from amp.encoder import MessagePattern, PatternEncoder, SubclassEncoder
+from amp.exceptions import ParseUnderflowError
+from amp.types import ToggleBool
+
+
+def test_message_pattern_parses_and_emits_core_types():
+    pattern = MessagePattern(
+        "AA{:=BB}{number:4N}{raw:2X}{signed:S}{enabled:bool}"
+        "{power:power_bool}{mute:mute_bool}{plain:utf8}!"
+    )
+    message = SimpleNamespace(
+        number=0x1234,
+        raw=HexBytes("CC"),
+        signed=-3,
+        enabled=True,
+        power=ToggleBool.Toggle,
+        mute=ToggleBool.On,
+        plain="Hi",
+    )
+
+    encoded = pattern.emit(message)
+
+    assert str(encoded) == "AABB1234CCFD0104004869"
+    assert pattern.parse(encoded) == {
+        "number": 0x1234,
+        "raw": HexBytes("CC"),
+        "signed": -3,
+        "enabled": True,
+        "power": ToggleBool.Toggle,
+        "mute": ToggleBool.On,
+        "plain": "Hi",
+    }
+
+
+def test_message_pattern_parses_uuid_guid_float_lenutf8_and_repeats():
+    value = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
+    pattern = MessagePattern("{normal:uuid}{wire:guid}{gain:float(160,0.0,1.0)}{name:lenutf8}{items:N*}!")
+    message = SimpleNamespace(normal=value, wire=value, gain=0.5, name="Amp", items=[1, 2])
+
+    encoded = pattern.emit(message)
+
+    assert encoded[:16] == HexBytes(value.bytes)
+    assert encoded[16:32] == HexBytes(value.bytes_le)
+    assert str(HexBytes(encoded[32:])) == "5003416D700102"
+    assert pattern.parse(encoded) == {
+        "normal": value,
+        "wire": value,
+        "gain": 0.5,
+        "name": "Amp",
+        "items": [1, 2],
+    }
+
+
+def test_optional_fields_are_absent_only_on_underflow():
+    pattern = MessagePattern("{enabled:bool?}!")
+
+    assert pattern.parse(b"") == {"enabled": None}
+    assert pattern.parse(HexBytes("01")) == {"enabled": True}
+    with pytest.raises(ValueError, match="invalid value for bool"):
+        pattern.parse(HexBytes("02"))
+
+
+def test_plus_repeat_requires_at_least_one_value():
+    pattern = MessagePattern("{items:N+}!")
+
+    assert pattern.parse(HexBytes("0102")) == {"items": [1, 2]}
+    with pytest.raises(ParseUnderflowError, match="at least 1"):
+        pattern.parse(b"")
+
+
+def test_consumes_all_marker_rejects_extra_input():
+    strict = MessagePattern("AA{value:N}!")
+    loose = MessagePattern("AA{value:N}")
+
+    assert loose.parse(HexBytes("AA0102")) == {"value": 1}
+    with pytest.raises(ValueError, match="extra unparsed input"):
+        strict.parse(HexBytes("AA0102"))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "message"),
+    [
+        ("{", "unmatched"),
+        ("{not-valid:N}", "invalid field name"),
+        ("{value:bogus}", "unsupported type specifier"),
+        ("{value:3N}", "multiple of 2"),
+        ("{value:3X}", "multiple of 2"),
+        ("{value:3S}", "multiple of 2"),
+    ],
+)
+def test_message_pattern_rejects_invalid_patterns(pattern: str, message: str):
+    with pytest.raises(ValueError, match=message):
+        MessagePattern(pattern)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "message", "error"),
+    [
+        ("{value:N}!", SimpleNamespace(value=256), "out of range"),
+        ("{value:S}!", SimpleNamespace(value=128), "out of range"),
+        ("{value:X}!", SimpleNamespace(value=1), "expected bytes"),
+        ("{value:bool}!", SimpleNamespace(value=1), "expected bool"),
+        ("{value:utf8}!", SimpleNamespace(value=b"x"), "expected str"),
+        ("{value:lenutf8}!", SimpleNamespace(value="x" * 32), "too long"),
+        ("{value:N*}!", SimpleNamespace(value=1), "expected list"),
+    ],
+)
+def test_message_pattern_validates_emitted_values(
+    pattern: str, message: SimpleNamespace, error: str
+):
+    with pytest.raises(ValueError, match=error):
+        MessagePattern(pattern).emit(message)
+
+
+def test_pattern_encoder_uses_class_pattern_by_default():
+    @dataclass(kw_only=True, frozen=True)
+    class Example:
+        PATTERN = "AA{value:N}!"
+
+        value: int
+
+    encoder = PatternEncoder(Example)
+
+    assert encoder.pattern == "AA{value:N}"
+    assert str(encoder.encode(Example(value=3))) == "AA03"
+    assert encoder.decode(HexBytes("AA03")) == Example(value=3)
+
+
+def test_pattern_encoder_accepts_explicit_pattern_and_validates_class_pattern():
+    class NoPattern:
+        pass
+
+    class BadPattern:
+        PATTERN = 1
+
+    assert PatternEncoder(NoPattern, "AA").pattern == "AA"
+    with pytest.raises(ValueError, match="no pattern specified"):
+        PatternEncoder(NoPattern)
+    with pytest.raises(ValueError, match="must be a string"):
+        PatternEncoder(BadPattern)
+
+
+def test_subclass_encoder_discovers_encodes_and_decodes_direct_subclasses():
+    class Base:
+        pass
+
+    @dataclass(kw_only=True, frozen=True)
+    class Alpha(Base):
+        PATTERN = "AA{value:N}!"
+
+        value: int
+
+    @dataclass(kw_only=True, frozen=True)
+    class Beta(Base):
+        PATTERN = "BB{value:N}!"
+
+        value: int
+
+    encoder = SubclassEncoder(Base)
+
+    assert str(encoder.encode(Alpha(value=1))) == "AA01"
+    assert encoder.decode(HexBytes("BB02")) == Beta(value=2)
+    assert encoder.decode(HexBytes("CC")) is None
+
+
+def test_subclass_encoder_skips_subclasses_with_invalid_patterns():
+    class Base:
+        pass
+
+    class Broken(Base):
+        PATTERN = "{value:bogus}!"
+
+    encoder = SubclassEncoder(Base)
+
+    with pytest.raises(ValueError, match="no matching pattern"):
+        encoder.encode(Broken())

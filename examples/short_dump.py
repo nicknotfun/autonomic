@@ -22,15 +22,9 @@ def main() -> None:
         default="10.1.0.200",
         help="Autonomic device hostname or IP address. Defaults to 10.1.0.200.",
     )
-    parser.add_argument(
-        "--mode",
-        choices=("auto", "mrad", "mas", "amplifier", "amp", "direct"),
-        default="auto",
-        help="Control mode. Defaults to auto-detection.",
-    )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host, mode=args.mode) as client:
+    with AutonomicClient(args.host) as client:
         sources = client.list_sources(include_disabled=True)
         zones = client.list_outputs(include_disabled=True, include_status=True)
         blocks = _device_blocks(sources, zones)
@@ -49,12 +43,17 @@ def main() -> None:
 
 def _device_blocks(sources: list[AutonomicSource], zones: list[AutonomicOutput]) -> list[DeviceBlock]:
     blocks: dict[str, DeviceBlock] = {}
-    for source in sources:
-        key, label = _device_key_and_label(source)
-        blocks.setdefault(key, DeviceBlock(label=label)).sources.append(source)
+    remote_sources_by_device: dict[str, set[str]] = {}
     for zone in zones:
         key, label = _device_key_and_label(zone)
         blocks.setdefault(key, DeviceBlock(label=label)).zones.append(zone)
+        if zone.source_id is not None:
+            remote_sources_by_device.setdefault(key, set()).add(_native_ref(zone.source_id))
+    for source in sources:
+        key, label = _device_key_and_label(source)
+        if _is_remote_source(source) and _native_ref(source.id) not in remote_sources_by_device.get(key, set()):
+            continue
+        blocks.setdefault(key, DeviceBlock(label=label)).sources.append(source)
     return [blocks[key] for key in sorted(blocks)]
 
 
@@ -129,10 +128,23 @@ def _sort_zones(zones: list[AutonomicOutput]) -> list[AutonomicOutput]:
     return sorted(zones, key=lambda zone: (_numeric_ref(zone.id), zone.name or ""))
 
 
+def _is_remote_source(source: AutonomicSource) -> bool:
+    try:
+        return int(_native_ref(source.id)) >= 0x20
+    except ValueError:
+        return False
+
+
+def _native_ref(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.rsplit(":", 1)[-1]
+
+
 def _numeric_ref(value: str | None) -> tuple[int, str]:
     if value is None:
         return (10_000, "")
-    native = value.rsplit(":", 1)[-1].removeprefix("Zone_")
+    native = _native_ref(value).removeprefix("Zone_")
     try:
         return (int(native), value)
     except ValueError:
