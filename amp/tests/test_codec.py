@@ -21,7 +21,7 @@ from amp.codec import (
     DeviceSystemIdOp,
     DiagnosticStatus1DOp,
     DiagnosticStatus1EOp,
-    ExtendedDeviceInfoDiscovery,
+    ExtendedDeviceInfoDiscoveryOp,
     ExtendedDeviceInfoOp,
     InputGainOp,
     LoudnessOp,
@@ -41,9 +41,11 @@ from amp.codec import (
     SourceDelayStatusOp,
     SourceMetadataOp,
     SourceMetadataQueryOp,
+    SourceNameDiscoveryOp,
     SourceNameOp,
     SourceSelectOp,
     TrebleOp,
+    ThisDeviceIdOp,
     UnknownOutputStatusOp,
     VolumeDownOp,
     VolumeOp,
@@ -53,35 +55,35 @@ from amp.codec import (
 )
 from amp.encoder import PatternEncoder, SubclassEncoder
 from amp.transport import Transport
-from amp.types import ToggleBool
+from amp.toggle_bool import ToggleBool
 
 
 GUID = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
 GUID_WIRE = "00194E67A9F8BEF6A4653D0FBEE12977"
 
 
-def test_pattern_encoder_uses_compiled_pattern_for_power_op_round_trip():
+def test_pattern_encoder_uses_compiled_pattern_for_power_op_round_trip() -> None:
     encoder = PatternEncoder(PowerOp)
 
     assert str(encoder.encode(PowerOp())) == "01FF"
     assert encoder.decode(bytes.fromhex("01FF")) == PowerOp()
 
 
-def test_subclass_encoder_encodes_power_op_registered_under_op():
+def test_subclass_encoder_encodes_power_op_registered_under_op() -> None:
     encoder = SubclassEncoder(Op)
 
     assert str(encoder.encode(PowerOp())) == "01FF"
     assert str(encoder.encode(PowerOp(output=1, is_on=ToggleBool.On))) == "010101"
 
 
-def test_subclass_encoder_preserves_matched_encoder_validation_error():
+def test_subclass_encoder_preserves_matched_encoder_validation_error() -> None:
     encoder = SubclassEncoder(Op)
 
     with pytest.raises(ValueError, match="out of range"):
         encoder.encode(PowerOp(output=256))
 
 
-def test_op_encoder_filters_writes_only_in_read_only_mode():
+def test_op_encoder_filters_writes_only_in_read_only_mode() -> None:
     read_only_encoder = OpEncoder()
 
     assert str(read_only_encoder.encode(PowerOp())) == "01FF"
@@ -90,7 +92,7 @@ def test_op_encoder_filters_writes_only_in_read_only_mode():
     assert str(OpEncoder(read_only=False).encode(PowerOp(is_on=ToggleBool.On))) == "01FF01"
 
 
-def test_op_encoder_decoder_delegates_to_subclass_decode():
+def test_op_encoder_decoder_delegates_to_subclass_decode() -> None:
     assert OpEncoder().decoder(bytes.fromhex("01FF")) == PowerOp()
     assert OpEncoder().decoder(bytes.fromhex("FFFF")) is None
 
@@ -109,11 +111,13 @@ def test_op_encoder_decoder_delegates_to_subclass_decode():
         (LoudnessOp(), "0CFF"),
         (MaxVolumeOp(), "0DFF"),
         (DeviceInfoDiscoveryOp(), "14FF06"),
-        (ExtendedDeviceInfoDiscovery(), "39FF"),
-        (ExtendedDeviceInfoDiscovery(device_id=HexBytes("00D4")), "39FF00D4"),
+        (ExtendedDeviceInfoDiscoveryOp(), "39FF"),
+        (ExtendedDeviceInfoDiscoveryOp(device_id=HexBytes("00D4")), "39FF00D4"),
         (DeviceGuidQueryOp(device_id=HexBytes("00D4")), "3AFF00D485"),
         (OutputNameRefreshOp(), "38FF"),
         (DeviceIdDiscoveryOp(), "2FFF"),
+        (SourceNameDiscoveryOp(output=9), "2909"),
+        (SourceNameOp(output=9, source_selector=0x05), "290905"),
         (ZoneGroupOp(), "30FF20"),
         (DelayOp(), "31FF"),
         (SourceMetadataQueryOp(source_selector=1, position=3), "47FF0103"),
@@ -125,7 +129,7 @@ def test_op_encoder_decoder_delegates_to_subclass_decode():
         (RemoteSourceDiscoveryOp(slot_id=0), "4FFF00"),
     ],
 )
-def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str):
+def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str) -> None:
     assert str(OpEncoder().encode(op)) == encoded
 
 
@@ -134,7 +138,7 @@ def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str):
     [
         (PowerOp(output=1, is_on=ToggleBool.On), "010101"),
         (MuteOp(output=1, is_muted=ToggleBool.On), "020100"),
-        (SourceSelectOp(output=1, source=5), "030105"),
+        (SourceSelectOp(output=1, source=HexBytes("05")), "030105"),
         (VolumeOp(output=1, volume=0.5), "040150"),
         (BassOp(output=1, bass=-3), "0501FD"),
         (TrebleOp(output=1, treble=4), "060104"),
@@ -148,14 +152,14 @@ def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str):
         (
             SourceNameOp(
                 output=1,
-                source_selector=HexBytes("05"),
+                source_selector=0x05,
                 misc=HexBytes("000001"),
                 name="A1",
             ),
             "2901050000014131",
         ),
         (DelayOp(output=1, delay=0x14), "310114"),
-        (InputGainOp(output=1, source_selector=2, gain=0.5), "32010209"),
+        (InputGainOp(output=1, source_selector=2, gains=(0.5,)), "32010209"),
         (OutputGainOp(output=1, gain=2), "440102"),
         (
             SourceMetadataOp(source_selector=1, position=3, value="Title"),
@@ -175,7 +179,7 @@ def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str):
         (RemoteSourceDeleteOp(slot_id=0), "4FFF0000"),
     ],
 )
-def test_write_patterns_encode_when_enabled(op: Op, encoded: str):
+def test_write_patterns_encode_when_enabled(op: Op, encoded: str) -> None:
     assert str(OpEncoder(read_only=False).encode(op)) == encoded
 
 
@@ -185,14 +189,14 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str):
         ("010104", PowerOp(output=1, is_on=ToggleBool.Toggle)),
         ("020100", MuteOp(output=1, is_muted=ToggleBool.On)),
         ("020101", MuteOp(output=1, is_muted=ToggleBool.Off)),
-        ("03010580", SourceSelectOp(output=1, source=5, detail=[0x80])),
-        ("04011428", VolumeOp(output=1, volume=0.125, detail=[0x28])),
+        ("03010580", SourceSelectOp(output=1, source=HexBytes("05"), detail=(0x80,))),
+        ("04011428", VolumeOp(output=1, volume=0.125, detail=(0x28,))),
         ("0501FD", BassOp(output=1, bass=-3)),
         ("060104", TrebleOp(output=1, treble=4)),
         ("0701F6", BalanceOp(output=1, balance=-10)),
         ("090100", OutputParametersRefreshOp(output=1, request=0)),
-        ("0C01000E", LoudnessOp(output=1, is_loud=False, detail=[0x0E])),
-        ("0D01A0C8", MaxVolumeOp(output=1, max_volume=0xA0, detail=[0xC8])),
+        ("0C01000E", LoudnessOp(output=1, is_loud=False, detail=(0x0E,))),
+        ("0D01A0C8", MaxVolumeOp(output=1, max_volume=0xA0, detail=(0xC8,))),
         ("1101", VolumeUpOp(output=1)),
         ("1201", VolumeDownOp(output=1)),
         ("14FF06", DeviceInfoDiscoveryOp()),
@@ -202,16 +206,18 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str):
                 firmware=6,
                 model_id=HexBytes("B0"),
                 device_id=HexBytes("00D4"),
-                zones=[1, 2, 3, 4, 5, 6, 7, 8],
+                zones=(1, 2, 3, 4, 5, 6, 7, 8),
             ),
         ),
-        ("39FF00D4", ExtendedDeviceInfoDiscovery(device_id=HexBytes("00D4"))),
+        ("39FF00D4", ExtendedDeviceInfoDiscoveryOp(device_id=HexBytes("00D4"))),
         (
             "B9FF000000D40603001F260A0100C8ACE14F0055B41907150002",
             ExtendedDeviceInfoOp(
-                output=ALL_OUTPUTS,
+                prefix=HexBytes("0000"),
                 device_id=HexBytes("00D4"),
+                model_info=HexBytes("0603001F260A0100C8"),
                 mac=HexBytes("ACE14F0055B4"),
+                detail=HexBytes("1907150002"),
             ),
         ),
         (f"3AFF00D405{GUID_WIRE}", DeviceGuidOp(device_id=HexBytes("00D4"), guid=GUID)),
@@ -229,30 +235,49 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str):
         ("1D0180", DiagnosticStatus1DOp(output=1, payload=HexBytes("80"))),
         ("1EFF00", DiagnosticStatus1EOp(output=ALL_OUTPUTS, payload=HexBytes("00"))),
         ("2FFF", DeviceIdDiscoveryOp()),
-        ("AFFF00D4010203", DeviceIdOp(device_id=HexBytes("00D4"), zones=[1, 2, 3])),
+        ("AFFF00D4010203", ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2, 3))),
         (
-            "2901050000014131",
+            "29FF054900004D4D532D3541204D",
             SourceNameOp(
-                output=1,
-                source_selector=HexBytes("05"),
-                misc=HexBytes("000001"),
-                name="A1",
+                output=ALL_OUTPUTS,
+                source_selector=0x05,
+                misc=HexBytes("490000"),
+                name="MMS-5A M",
             ),
         ),
-        ("29FF", SourceNameOp()),
-        ("3001030203", ZoneGroupOp(output=1, flags=3, members=[2, 3])),
+        (
+            "29090500000115506C617965725F4140414345313446303036303132506C617965725F41",
+            SourceNameOp(
+                output=9,
+                source_selector=0x05,
+                misc=HexBytes("000001"),
+                hidden_name="Player_A@ACE14F006012",
+                name="Player_A",
+            ),
+        ),
+        (
+            "2901000000025335",
+            SourceNameOp(
+                output=1,
+                source_selector=0x00,
+                misc=HexBytes("000002"),
+                name="S5",
+            ),
+        ),
+        ("29FF05", SourceNameOp(output=ALL_OUTPUTS, source_selector=0x05)),
+        ("29FF", SourceNameDiscoveryOp(output=ALL_OUTPUTS)),
+        ("3001030203", ZoneGroupOp(output=1, flags=3, members=(2, 3))),
         ("310114", DelayOp(output=1, delay=0x14)),
         (
             "31011900000000000000",
-            SourceDelayStatusOp(output=1, source_delays=[0x19, 0, 0, 0, 0, 0, 0, 0]),
+            SourceDelayStatusOp(output=1, source_delays=(0x19, 0, 0, 0, 0, 0, 0, 0)),
         ),
         (
             "3201FF0000000000000000",
             InputGainOp(
                 output=1,
                 source_selector=0xFF,
-                gain=0.0,
-                source_gains=[0, 0, 0, 0, 0, 0, 0],
+                gains=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             ),
         ),
         ("440102", OutputGainOp(output=1, gain=2)),
@@ -290,11 +315,11 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str):
         ("4FFF0000", RemoteSourceDeleteOp(slot_id=0)),
     ],
 )
-def test_protocol_rows_decode(encoded: str, op: Op):
+def test_protocol_rows_decode(encoded: str, op: Op) -> None:
     assert OpEncoder().decoder(bytes.fromhex(encoded)) == op
 
 
-def test_connect_builds_transport_with_op_encoder():
+def test_connect_builds_transport_with_op_encoder() -> None:
     transport = connect(
         "127.0.0.1",
         port=12345,

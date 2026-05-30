@@ -11,7 +11,7 @@ from amp.codec import (
     DeviceInfoDiscoveryOp,
     OutputNameRefreshOp,
     PowerOp,
-    SourceNameOp,
+    SourceNameDiscoveryOp,
     connect,
 )
 
@@ -28,6 +28,7 @@ async def run(
     retry_wait: float,
     listen_secs: float,
     source_names: bool,
+    source_output: int,
     quiet: bool,
 ) -> None:
     click.echo(f"Connecting to {host} and bootstrapping...")
@@ -46,7 +47,7 @@ async def run(
             DeviceInfoDiscoveryOp(),
         ]
         if source_names:
-            bootstrap_ops.append(SourceNameOp())
+            bootstrap_ops.append(SourceNameDiscoveryOp(output=source_output))
         transport.send(*bootstrap_ops)
         await asyncio.sleep(listen_secs)
 
@@ -71,6 +72,30 @@ class DeviceIdParam(click.ParamType):
         if len(device_id) != 2:
             self.fail("must be exactly four hex digits", param, ctx)
         return device_id
+
+
+class OutputByteParam(click.ParamType):
+    name = "output-byte"
+
+    def convert(
+        self,
+        value: object,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> int:
+        if isinstance(value, int):
+            output = value
+        elif isinstance(value, str):
+            raw = value.removeprefix("0x").removeprefix("0X")
+            try:
+                output = int(raw, 16)
+            except ValueError as exc:
+                self.fail(str(exc), param, ctx)
+        else:
+            self.fail("must be a hexadecimal byte", param, ctx)
+        if output < 0 or output > 0xFF:
+            self.fail("must be in range 00-FF", param, ctx)
+        return output
 
 
 @click.command(
@@ -114,6 +139,13 @@ class DeviceIdParam(click.ParamType):
     help="Seconds to keep the probe running after sending bootstrap queries.",
 )
 @click.option("--source-names", is_flag=True, help="Also send the source-name query.")
+@click.option(
+    "--source-output",
+    type=OutputByteParam(),
+    default="01",
+    show_default=True,
+    help="Hex output byte to use for source-name discovery when --source-names is set.",
+)
 @click.option("--quiet", is_flag=True, help="Disable decoded row tracing.")
 def main(
     host: str,
@@ -123,6 +155,7 @@ def main(
     retry_wait: float,
     listen_secs: float,
     source_names: bool,
+    source_output: int,
     quiet: bool,
 ) -> None:
     asyncio.run(
@@ -134,6 +167,7 @@ def main(
             retry_wait=retry_wait,
             listen_secs=listen_secs,
             source_names=source_names,
+            source_output=source_output,
             quiet=quiet,
         )
     )

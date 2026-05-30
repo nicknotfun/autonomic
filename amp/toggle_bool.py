@@ -39,6 +39,17 @@ class ToggleBool(Enum):
             case ToggleBool.Toggle:
                 return HexBytes("02")
 
+    def as_bool(self, existing: bool | None = None) -> bool | None:
+        match self:
+            case ToggleBool.Off:
+                return False
+            case ToggleBool.On:
+                return True
+            case ToggleBool.Toggle:
+                if existing is None:
+                    return None
+                return not existing
+
     @staticmethod
     def consume(value: HexBytes | int, *, for_mute: bool = False) -> "ToggleBool":
         if isinstance(value, HexBytes):

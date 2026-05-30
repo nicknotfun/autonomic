@@ -1,12 +1,13 @@
 """Codec for encoding and decoding AMP operations."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import ClassVar
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
 from amp.encoder import SubclassEncoder
+from amp.toggle_bool import ToggleBool
 from amp.transport import Transport
-from amp.types import ToggleBool
 
 ALL_OUTPUTS = 0xFF
 
@@ -17,10 +18,14 @@ class Op:
 
 
 @dataclass(kw_only=True, frozen=True)
-class PowerOp(Op):
-    PATTERN = "01{output:N}{is_on:power_bool?}!"
-
+class OutputOp(Op):
     output: int = ALL_OUTPUTS
+
+
+@dataclass(kw_only=True, frozen=True)
+class PowerOp(OutputOp):
+    PATTERN: ClassVar[str] = "01{output:N}{is_on:power_bool?}!"
+
     is_on: ToggleBool | None = None
 
     def is_write(self) -> bool:
@@ -28,10 +33,9 @@ class PowerOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class MuteOp(Op):
-    PATTERN = "02{output:N}{is_muted:mute_bool?}!"
+class MuteOp(OutputOp):
+    PATTERN: ClassVar[str] = "02{output:N}{is_muted:mute_bool?}!"
 
-    output: int = ALL_OUTPUTS
     is_muted: ToggleBool | None = None
 
     def is_write(self) -> bool:
@@ -39,34 +43,31 @@ class MuteOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class SourceSelectOp(Op):
-    PATTERN = "03{output:N}{source:N?}{detail:N*}!"
+class SourceSelectOp(OutputOp):
+    PATTERN: ClassVar[str] = "03{output:N}{source:X?}{detail:N*}!"
 
-    output: int = ALL_OUTPUTS
-    source: int | None = None
-    detail: list[int] = field(default_factory=list)
+    source: HexBytes | None = None
+    detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return self.source is not None
 
 
 @dataclass(kw_only=True, frozen=True)
-class VolumeOp(Op):
-    PATTERN = "04{output:N}{volume:float(160,0.0,1.0)?}{detail:N*}!"
+class VolumeOp(OutputOp):
+    PATTERN: ClassVar[str] = "04{output:N}{volume:float(160,0.0,1.0)?}{detail:N*}!"
 
-    output: int = ALL_OUTPUTS
     volume: float | None = None
-    detail: list[int] = field(default_factory=list)
+    detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return self.volume is not None
 
 
 @dataclass(kw_only=True, frozen=True)
-class BassOp(Op):
-    PATTERN = "05{output:N}{bass:S?}!"
+class BassOp(OutputOp):
+    PATTERN: ClassVar[str] = "05{output:N}{bass:S?}!"
 
-    output: int = ALL_OUTPUTS
     bass: int | None = None
 
     def is_write(self) -> bool:
@@ -74,10 +75,9 @@ class BassOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class TrebleOp(Op):
-    PATTERN = "06{output:N}{treble:S?}!"
+class TrebleOp(OutputOp):
+    PATTERN: ClassVar[str] = "06{output:N}{treble:S?}!"
 
-    output: int = ALL_OUTPUTS
     treble: int | None = None
 
     def is_write(self) -> bool:
@@ -85,10 +85,9 @@ class TrebleOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class BalanceOp(Op):
-    PATTERN = "07{output:N}{balance:S?}!"
+class BalanceOp(OutputOp):
+    PATTERN: ClassVar[str] = "07{output:N}{balance:S?}!"
 
-    output: int = ALL_OUTPUTS
     balance: int | None = None
 
     def is_write(self) -> bool:
@@ -96,10 +95,9 @@ class BalanceOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class OutputParametersRefreshOp(Op):
-    PATTERN = "09{output:N}{request:N?}!"
+class OutputParametersRefreshOp(OutputOp):
+    PATTERN: ClassVar[str] = "09{output:N}{request:N?}!"
 
-    output: int = ALL_OUTPUTS
     request: int | None = 0
 
     def is_write(self) -> bool:
@@ -107,67 +105,65 @@ class OutputParametersRefreshOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class LoudnessOp(Op):
-    PATTERN = "0C{output:N}{is_loud:bool?}{detail:N*}!"
+class LoudnessOp(OutputOp):
+    PATTERN: ClassVar[str] = "0C{output:N}{is_loud:bool?}{detail:N*}!"
 
-    output: int = ALL_OUTPUTS
     is_loud: bool | None = None
-    detail: list[int] = field(default_factory=list)
+    detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return self.is_loud is not None
 
 
 @dataclass(kw_only=True, frozen=True)
-class MaxVolumeOp(Op):
-    PATTERN = "0D{output:N}{max_volume:N?}{detail:N*}!"
+class MaxVolumeOp(OutputOp):
+    PATTERN: ClassVar[str] = "0D{output:N}{max_volume:N?}{detail:N*}!"
 
-    output: int = ALL_OUTPUTS
     max_volume: int | None = None
-    detail: list[int] = field(default_factory=list)
+    detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return self.max_volume is not None
 
 
 @dataclass(kw_only=True, frozen=True)
-class VolumeUpOp(Op):
-    PATTERN = "11{output:N}!"
-
-    output: int = ALL_OUTPUTS
+class VolumeUpOp(OutputOp):
+    PATTERN: ClassVar[str] = "11{output:N}!"
 
 
 @dataclass(kw_only=True, frozen=True)
-class VolumeDownOp(Op):
-    PATTERN = "12{output:N}!"
-
-    output: int = ALL_OUTPUTS
+class VolumeDownOp(OutputOp):
+    PATTERN: ClassVar[str] = "12{output:N}!"
 
 
 @dataclass(kw_only=True, frozen=True)
 class DeviceInfoDiscoveryOp(Op):
-    PATTERN = "14FF06!"
+    PATTERN: ClassVar[str] = "14FF06!"
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceInfoOp(Op):
-    PATTERN = "94FF00{firmware:N}{model_id}{device_id:4X}{zones:N+}!"
+class DeviceIdOp(Op):
+    device_id: HexBytes
+
+
+@dataclass(kw_only=True, frozen=True)
+class DeviceInfoOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "94FF00{firmware:N}{model_id}{device_id:4X}{zones:N+}!"
 
     firmware: int
     model_id: HexBytes
-    device_id: HexBytes
-    zones: list[int]
+    zones: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class ExtendedDeviceInfoDiscovery(Op):
-    PATTERN = "39FF{device_id:4X?}!"
+class ExtendedDeviceInfoDiscoveryOp(Op):
+    PATTERN: ClassVar[str] = "39FF{device_id:4X?}!"
 
     device_id: HexBytes | None = None
 
@@ -176,32 +172,32 @@ class ExtendedDeviceInfoDiscovery(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class ExtendedDeviceInfoOp(Op):
-    PATTERN = "B9{output:N}{:4X}{device_id:4X}{:18X}{mac:12X}"
+class ExtendedDeviceInfoOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = (
+        "B9FF{prefix:4X}{device_id:4X}{model_info:18X}{mac:12X}{detail:hex}!"
+    )
 
-    output: int = ALL_OUTPUTS
-    device_id: HexBytes
+    prefix: HexBytes
+    model_info: HexBytes
     mac: HexBytes
+    detail: HexBytes = HexBytes("")
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceGuidQueryOp(Op):
-    PATTERN = "3AFF{device_id:4X}85!"
-
-    device_id: HexBytes
+class DeviceGuidQueryOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "3AFF{device_id:4X}85!"
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceGuidOp(Op):
-    PATTERN = "3AFF{device_id:4X}05{guid:guid}!"
+class DeviceGuidOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "3AFF{device_id:4X}05{guid:guid}!"
 
-    device_id: HexBytes
     guid: UUID
 
     def is_write(self) -> bool:
@@ -209,10 +205,9 @@ class DeviceGuidOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceSystemIdOp(Op):
-    PATTERN = "3AFF{device_id:4X}06{system_id:N}!"
+class DeviceSystemIdOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "3AFF{device_id:4X}06{system_id:N}!"
 
-    device_id: HexBytes
     system_id: int
 
     def is_write(self) -> bool:
@@ -220,10 +215,9 @@ class DeviceSystemIdOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceSubInfoOp(Op):
-    PATTERN = "3AFF{device_id:4X}{subtype:N}{payload:hex}!"
+class DeviceSubInfoOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "3AFF{device_id:4X}{subtype:N}{payload:hex}!"
 
-    device_id: HexBytes
     subtype: int
     payload: HexBytes
 
@@ -232,26 +226,24 @@ class DeviceSubInfoOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class OutputNameRefreshOp(Op):
-    PATTERN = "38FF!"
+class OutputNameRefreshOp(OutputOp):
+    PATTERN: ClassVar[str] = "38{output:N}!"
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class OutputNameOp(Op):
-    PATTERN = "1C{output:N}{name:utf8}!"
+class OutputNameOp(OutputOp):
+    PATTERN: ClassVar[str] = "1C{output:N}{name:utf8}!"
 
-    output: int
-    name: str
+    name: str = ""
 
 
 @dataclass(kw_only=True, frozen=True)
-class DiagnosticStatus1DOp(Op):
-    PATTERN = "1D{output:N}{payload:hex}!"
+class DiagnosticStatus1DOp(OutputOp):
+    PATTERN: ClassVar[str] = "1D{output:N}{payload:hex}!"
 
-    output: int
     payload: HexBytes
 
     def is_write(self) -> bool:
@@ -259,10 +251,9 @@ class DiagnosticStatus1DOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DiagnosticStatus1EOp(Op):
-    PATTERN = "1E{output:N}{payload:hex}!"
+class DiagnosticStatus1EOp(OutputOp):
+    PATTERN: ClassVar[str] = "1E{output:N}{payload:hex}!"
 
-    output: int
     payload: HexBytes
 
     def is_write(self) -> bool:
@@ -271,29 +262,37 @@ class DiagnosticStatus1EOp(Op):
 
 @dataclass(kw_only=True, frozen=True)
 class DeviceIdDiscoveryOp(Op):
-    PATTERN = "2FFF!"
+    PATTERN: ClassVar[str] = "2FFF!"
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceIdOp(Op):
-    PATTERN = "AFFF{device_id:4X}{zones:N*}!"
+class ThisDeviceIdOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "AFFF{device_id:4X}{zones:N*}!"
 
-    device_id: HexBytes
-    zones: list[int]
+    zones: tuple[int, ...]
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class SourceNameOp(Op):
-    PATTERN = "29{output:N}{source_selector:X?}{misc:6X?}{hidden_name:lenutf8?}{name:utf8?}!"
+class SourceNameDiscoveryOp(OutputOp):
+    PATTERN: ClassVar[str] = "29{output:N}!"
 
-    output: int = ALL_OUTPUTS
-    source_selector: HexBytes | None = None
+    def is_write(self) -> bool:
+        return False
+
+
+@dataclass(kw_only=True, frozen=True)
+class SourceNameOp(OutputOp):
+    PATTERN: ClassVar[str] = (
+        "29{output:N}{source_selector:N}{misc:6X?}{hidden_name:lenutf8?}{name:utf8?}!"
+    )
+
+    source_selector: int
     misc: HexBytes | None = None
     hidden_name: str | None = None
     name: str | None = None
@@ -303,22 +302,20 @@ class SourceNameOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class ZoneGroupOp(Op):
-    PATTERN = "30{output:N}{flags:N?}{members:N*}!"
+class ZoneGroupOp(OutputOp):
+    PATTERN: ClassVar[str] = "30{output:N}{flags:N?}{members:N*}!"
 
-    output: int = ALL_OUTPUTS
     flags: int | None = 0x20
-    members: list[int] = field(default_factory=list)
+    members: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class DelayOp(Op):
-    PATTERN = "31{output:N}{delay:N?}!"
+class DelayOp(OutputOp):
+    PATTERN: ClassVar[str] = "31{output:N}{delay:N?}!"
 
-    output: int = ALL_OUTPUTS
     delay: int | None = None
 
     def is_write(self) -> bool:
@@ -326,34 +323,30 @@ class DelayOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class SourceDelayStatusOp(Op):
-    PATTERN = "31{output:N}{source_delays:N+}!"
+class SourceDelayStatusOp(OutputOp):
+    PATTERN: ClassVar[str] = "31{output:N}{source_delays:N+}!"
 
-    output: int
-    source_delays: list[int]
+    source_delays: tuple[int, ...]
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class InputGainOp(Op):
-    PATTERN = "32{output:N}{source_selector:N?}{gain:float(18,0.0,1.0)?}{source_gains:N*}!"
+class InputGainOp(OutputOp):
+    PATTERN: ClassVar[str] = "32{output:N}{source_selector:N?}{gains:float(18,0.0,1.0)*?}!"
 
-    output: int = ALL_OUTPUTS
     source_selector: int | None = None
-    gain: float | None = None
-    source_gains: list[int] = field(default_factory=list)
+    gains: tuple[float, ...] | None = None
 
     def is_write(self) -> bool:
-        return self.source_selector is not None and self.gain is not None
+        return self.gains is not None
 
 
 @dataclass(kw_only=True, frozen=True)
-class OutputGainOp(Op):
-    PATTERN = "44{output:N}{gain:S?}!"
+class OutputGainOp(OutputOp):
+    PATTERN: ClassVar[str] = "44{output:N}{gain:S?}!"
 
-    output: int = ALL_OUTPUTS
     gain: int | None = None
 
     def is_write(self) -> bool:
@@ -361,20 +354,18 @@ class OutputGainOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class SourceMetadataOp(Op):
-    PATTERN = "46{output:N}{source_selector:N}{position:N}{value:utf8}!"
+class SourceMetadataOp(OutputOp):
+    PATTERN: ClassVar[str] = "46{output:N}{source_selector:N}{position:N}{value:utf8}!"
 
-    output: int = ALL_OUTPUTS
     source_selector: int
     position: int
     value: str
 
 
 @dataclass(kw_only=True, frozen=True)
-class SourceMetadataQueryOp(Op):
-    PATTERN = "47{output:N}{source_selector:N}{position:N}!"
+class SourceMetadataQueryOp(OutputOp):
+    PATTERN: ClassVar[str] = "47{output:N}{source_selector:N}{position:N}!"
 
-    output: int = ALL_OUTPUTS
     source_selector: int
     position: int
 
@@ -383,10 +374,9 @@ class SourceMetadataQueryOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class UnknownOutputStatusOp(Op):
-    PATTERN = "48{output:N}{payload:hex}!"
+class UnknownOutputStatusOp(OutputOp):
+    PATTERN: ClassVar[str] = "48{output:N}{payload:hex}!"
 
-    output: int
     payload: HexBytes
 
     def is_write(self) -> bool:
@@ -394,10 +384,9 @@ class UnknownOutputStatusOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceStateOp(Op):
-    PATTERN = "4AFF{device_id:4X}{state:hex?}!"
+class DeviceStateOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "4AFF{device_id:4X}{state:hex?}!"
 
-    device_id: HexBytes
     state: HexBytes | None = None
 
     def is_write(self) -> bool:
@@ -405,10 +394,9 @@ class DeviceStateOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceLinkQueryOp(Op):
-    PATTERN = "4DFF{device_id:4X}{linked:bool?}!"
+class DeviceLinkQueryOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "4DFF{device_id:4X}{linked:bool?}!"
 
-    device_id: HexBytes
     linked: bool | None = None
 
     def is_write(self) -> bool:
@@ -416,10 +404,9 @@ class DeviceLinkQueryOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class DeviceLinkOp(Op):
-    PATTERN = "CDFF{device_id:4X}{linked:bool?}!"
+class DeviceLinkOp(DeviceIdOp):
+    PATTERN: ClassVar[str] = "CDFF{device_id:4X}{linked:bool?}!"
 
-    device_id: HexBytes
     linked: bool | None = None
 
     def is_write(self) -> bool:
@@ -428,7 +415,7 @@ class DeviceLinkOp(Op):
 
 @dataclass(kw_only=True, frozen=True)
 class PresetGroupOp(Op):
-    PATTERN = "4EFF{slot_id:4N}{payload:hex?}!"
+    PATTERN: ClassVar[str] = "4EFF{slot_id:4N}{payload:hex?}!"
 
     slot_id: int = 0
     payload: HexBytes | None = None
@@ -439,7 +426,7 @@ class PresetGroupOp(Op):
 
 @dataclass(kw_only=True, frozen=True)
 class RemoteSourceDiscoveryOp(Op):
-    PATTERN = "4FFF{slot_id:N?}!"
+    PATTERN: ClassVar[str] = "4FFF{slot_id:N?}!"
 
     slot_id: int | None = None
 
@@ -449,7 +436,7 @@ class RemoteSourceDiscoveryOp(Op):
 
 @dataclass(kw_only=True, frozen=True)
 class RemoteSourceInfoOp(Op):
-    PATTERN = "4FFF{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!"
+    PATTERN: ClassVar[str] = "4FFF{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!"
 
     slot_id: int
     backing_device_guid: UUID
@@ -462,7 +449,7 @@ class RemoteSourceInfoOp(Op):
 
 @dataclass(kw_only=True, frozen=True)
 class RemoteSourceDeleteOp(Op):
-    PATTERN = "4FFF{slot_id:N}00!"
+    PATTERN: ClassVar[str] = "4FFF{slot_id:N}00!"
 
     slot_id: int
 
@@ -472,12 +459,12 @@ class OpEncoder(SubclassEncoder[Op]):
         super().__init__(Op)
         self.read_only = read_only
 
-    def encode(self, value: Op) -> bytes | None:
+    def encode(self, value: Op) -> HexBytes | None:
         if self.read_only and value.is_write():
             return None
         return super().encode(value)
 
-    def decoder(self, value: bytes) -> Op:
+    def decoder(self, value: bytes) -> Op | None:
         return super().decode(value)
 
 

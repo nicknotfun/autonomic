@@ -3,7 +3,7 @@
 Exists just to make codec.py much cleaner as a description of the protocol.
 """
 
-from abc import ABC
+from abc import ABC, abstractmethod
 import logging
 import re
 from typing import Any, Generic, TypeVar
@@ -11,7 +11,7 @@ from uuid import UUID
 
 from amp.byte_utils import HexBytes
 from amp.exceptions import ParseUnderflowError
-from amp.types import ToggleBool
+from amp.toggle_bool import ToggleBool
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,10 @@ T = TypeVar("T")
 class MessageParseStep(ABC, Generic[T]):
     """Represents a single step in parsing or emitting a message according to a MessagePattern."""
 
+    @abstractmethod
     def consume(self, input: HexBytes) -> tuple[T, int]: ...
+
+    @abstractmethod
     def emit(self, value: T) -> HexBytes: ...
 
 
@@ -156,7 +159,7 @@ class StringParseStep(MessageParseStep[str]):
         if self.has_length_prefix:
             if len(encoded) >= 32:
                 raise ValueError("string value is too long to encode with length prefix")
-            return HexBytes.from_int(len(encoded)) + encoded
+            return HexBytes(HexBytes.from_int(len(encoded)) + encoded)
         else:
             return encoded
 
@@ -244,19 +247,19 @@ class OptionalParseStep(MessageParseStep[T | None]):
         return self.sub_pattern.emit(value)
 
 
-class RepeatParseStep(MessageParseStep[list[T]]):
+class RepeatParseStep(MessageParseStep[tuple[T, ...]]):
     """A parse step that repeats a sub-pattern a variable number of times until the input is exhausted."""
 
     def __init__(self, *, sub_pattern: MessageParseStep[T], min_repeats: int) -> None:
         self.sub_pattern = sub_pattern
         self.min_repeats = min_repeats
 
-    def consume(self, input: HexBytes) -> tuple[list[T], int]:
+    def consume(self, input: HexBytes) -> tuple[tuple[T, ...], int]:
         values: list[T] = []
         total_consumed = 0
         while total_consumed < len(input):
             try:
-                value, consumed = self.sub_pattern.consume(input[total_consumed:])
+                value, consumed = self.sub_pattern.consume(HexBytes(input[total_consumed:]))
                 if consumed == 0:
                     break
                 values.append(value)
@@ -267,15 +270,15 @@ class RepeatParseStep(MessageParseStep[list[T]]):
             raise ParseUnderflowError(
                 f"expected at least {self.min_repeats} repetitions but got {len(values)}"
             )
-        return values, total_consumed
+        return tuple(values), total_consumed
 
-    def emit(self, values: list[T]) -> HexBytes:
-        if not isinstance(values, list):
-            raise ValueError(f"expected list value but got {values!r}")
-        output = HexBytes(b"")
+    def emit(self, values: tuple[T, ...]) -> HexBytes:
+        if not isinstance(values, tuple):
+            raise ValueError(f"expected tuple value but got {values!r}")
+        chunks: list[HexBytes] = []
         for value in values:
-            output += self.sub_pattern.emit(value)
-        return output
+            chunks.append(self.sub_pattern.emit(value))
+        return HexBytes(b"".join(chunks))
 
 
 class MessagePattern:
@@ -290,7 +293,7 @@ class MessagePattern:
         self.raw = pattern
         self.steps = self._compile(pattern)
 
-    def _compile_step(self, *, type_spec: str, optional: bool = False) -> MessageParseStep:
+    def _compile_step(self, *, type_spec: str) -> MessageParseStep[Any]:
         if type_spec.startswith("="):
             return FixedParseStep(expected=HexBytes(type_spec[1:]))
         elif type_spec == "power_bool":
@@ -350,8 +353,8 @@ class MessagePattern:
 
         raise ValueError(f"unsupported type specifier in pattern: {type_spec}")
 
-    def _compile(self, pattern: str) -> list[MessageParseStep]:
-        steps: list[MessageParseStep] = []
+    def _compile(self, pattern: str) -> list[tuple[str | None, MessageParseStep[Any]]]:
+        steps: list[tuple[str | None, MessageParseStep[Any]]] = []
         i = 0
         while i < len(pattern):
             if pattern[i] == "{":
@@ -361,11 +364,11 @@ class MessagePattern:
                 field_spec = pattern[i + 1 : end]
 
                 if ":" in field_spec:
-                    field_name, type_spec = field_spec.split(":", 1)
+                    raw_field_name, type_spec = field_spec.split(":", 1)
                 else:
-                    field_name, type_spec = field_spec, "2X"
+                    raw_field_name, type_spec = field_spec, "2X"
 
-                field_name = field_name.strip()
+                field_name: str | None = raw_field_name.strip()
                 type_spec = type_spec.strip()
 
                 if not field_name:
@@ -407,9 +410,10 @@ class MessagePattern:
 
     def parse(self, input: bytes) -> dict[str, Any]:
         target: dict[str, Any] = {}
+        source = HexBytes(input)
         total_consumed = 0
         for field_name, step in self.steps:
-            value, consumed = step.consume(input[total_consumed:])
+            value, consumed = step.consume(HexBytes(source[total_consumed:]))
             if field_name is not None:
                 target[field_name] = value
             total_consumed += consumed
@@ -418,11 +422,11 @@ class MessagePattern:
         return target
 
     def emit(self, message: object) -> HexBytes:
-        output = HexBytes(b"")
+        chunks: list[HexBytes] = []
         for field_name, step in self.steps:
             value = getattr(message, field_name) if field_name is not None else None
-            output += step.emit(value)
-        return HexBytes(output)
+            chunks.append(step.emit(value))
+        return HexBytes(b"".join(chunks))
 
 
 class PatternEncoder(Generic[T]):
@@ -463,14 +467,17 @@ class SubclassEncoder(Generic[T]):
 
     def __init__(self, target_type: type[T]) -> None:
         self.target_type = target_type
-        self.encoders: list[PatternEncoder] = []
-        self.discover_patterns()
+        self.encoders: list[PatternEncoder[T]] = []
+        self.discover_patterns(from_type=target_type)
         self.encoders = sorted(self.encoders, key=lambda encoder: encoder.pattern)
         for encoder in self.encoders:
             logger.debug("registered: %s -> %s", encoder.pattern, encoder.cls.__name__)
 
-    def discover_patterns(self) -> None:
-        for cls in self.target_type.__subclasses__():
+    def discover_patterns(self, from_type: type[T]) -> None:
+        for cls in from_type.__subclasses__():
+            self.discover_patterns(from_type=cls)
+            if not hasattr(cls, "PATTERN"):
+                continue
             try:
                 encoder = PatternEncoder(cls)
             except ValueError as e:
@@ -480,7 +487,7 @@ class SubclassEncoder(Generic[T]):
                 continue
             self.encoders.append(encoder)
 
-    def encode(self, message: T) -> HexBytes:
+    def encode(self, message: T) -> HexBytes | None:
         for encoder in self.encoders:
             if type(message) is encoder.cls:
                 return encoder.encode(message)
@@ -488,16 +495,16 @@ class SubclassEncoder(Generic[T]):
             f"no matching pattern found to encode message of type {type(message).__name__}"
         )
 
-    def decode(self, data: bytes) -> T:
+    def decode(self, data: bytes) -> T | None:
         first_decoding: T | None = None
-        errors: list[tuple[PatternEncoder, Exception]] = []
+        errors: list[tuple[PatternEncoder[T], Exception]] = []
         for encoder in self.encoders:
             try:
                 decoded = encoder.decode(data)
                 if first_decoding is None:
                     first_decoding = decoded
                 else:
-                    logger.warning(
+                    logger.debug(
                         "multiple patterns matched for decoding data: %r, got %r and %r",
                         data,
                         first_decoding,
@@ -508,7 +515,7 @@ class SubclassEncoder(Generic[T]):
                 continue
         if first_decoding is None:
             for encoder, error in sorted(errors, key=lambda pair: pair[0].pattern):
-                logger.warning(
+                logger.debug(
                     "%r failed: %s",
                     encoder.pattern,
                     error,

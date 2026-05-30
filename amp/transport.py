@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import (
     Any,
-    AsyncIterator,
+    AsyncGenerator,
     Generic,
     Protocol,
     TypeVar,
@@ -16,31 +16,52 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-class OpQueue(Generic[T]):
-    def __init__(self) -> None:
-        self._queue: asyncio.Queue[T] = asyncio.Queue()
-        self._incomplete: list[T] = []
+class Encoder(Protocol, Generic[T]):
+    def encode(self, value: T) -> bytes | None: ...
+    def decoder(self, value: bytes) -> T | None: ...
+
+
+class ConnectionInterrupted:
+    pass
+
+
+class TransportQueue(Generic[T]):
+    def __init__(self, encoder: Encoder[Any]) -> None:
+        self._queue: asyncio.Queue[tuple[T, bytes]] = asyncio.Queue()
+        self._incomplete: list[tuple[T, bytes]] = []
+        self._queued_encoded: set[bytes] = set()
+        self.encoder = encoder
 
     def shutdown(self) -> None:
         self._queue.shutdown()
 
-    def push(self, value: T) -> None:
-        self._queue.put_nowait(value)
+    def _encode(self, value: T) -> bytes | None:
+        if isinstance(value, ConnectionInterrupted):
+            return b""
+        return self.encoder.encode(value)
+
+    def push(self, value: T, *, encoded: bytes | None = None) -> None:
+        if not value:
+            return
+        if encoded is None:
+            encoded = self._encode(value)
+        if encoded is None:
+            return
+        if encoded in self._queued_encoded:
+            return
+        self._queued_encoded.add(encoded)
+        self._queue.put_nowait((value, encoded))
 
     def task_done(self) -> None:
-        self._incomplete.pop(0)
+        _, encoded = self._incomplete.pop(0)
+        self._queued_encoded.discard(encoded)
 
-    async def pull(self) -> T:
+    async def pull(self) -> tuple[T, bytes]:
         if self._incomplete:
             return self._incomplete[0]
         value = await self._queue.get()
         self._incomplete.append(value)
         return value
-
-
-class Encoder(Protocol, Generic[T]):
-    def encode(self, value: T) -> bytes | None: ...
-    def decoder(self, value: bytes) -> T: ...
 
 
 class Transport(Generic[T]):
@@ -54,8 +75,8 @@ class Transport(Generic[T]):
         connection_timeout_secs: float = 10.0,
         trace: bool = False,
     ) -> None:
-        self.outbound = OpQueue()
-        self.inbound: asyncio.Queue[T] = asyncio.Queue()
+        self.outbound: TransportQueue[T] = TransportQueue(encoder)
+        self.inbound: TransportQueue[T | ConnectionInterrupted] = TransportQueue(encoder)
         self.host = host
         self.port = port
         self.reconnection_wait_secs = reconnection_wait_secs
@@ -63,6 +84,16 @@ class Transport(Generic[T]):
         self._loop_task: asyncio.Task[None] | None = None
         self.trace = trace
         self.encoder = encoder
+
+    def fork(self) -> "Transport[T]":
+        return Transport(
+            self.encoder,
+            self.host,
+            self.port,
+            reconnection_wait_secs=self.reconnection_wait_secs,
+            connection_timeout_secs=self.connection_timeout_secs,
+            trace=self.trace,
+        )
 
     def _maybe_start_loop(self) -> None:
         if self._loop_task is None:
@@ -73,11 +104,16 @@ class Transport(Generic[T]):
         for op in ops:
             self.outbound.push(op)
 
-    async def recv(self) -> AsyncIterator[T]:
+    async def recv(self) -> AsyncGenerator[T | ConnectionInterrupted, None]:
         self._maybe_start_loop()
         while True:
             try:
-                yield await self.inbound.get()
+                inbound = self.inbound
+                op, _ = await inbound.pull()
+                try:
+                    yield op
+                finally:
+                    inbound.task_done()
             except asyncio.CancelledError:
                 break
             except asyncio.QueueShutDown:
@@ -89,12 +125,12 @@ class Transport(Generic[T]):
             self._loop_task = None
 
         self.inbound.shutdown()
-        self.inbound = asyncio.Queue()
+        self.inbound = TransportQueue(self.encoder)
 
         self.outbound.shutdown()
-        self.outbound = OpQueue()
+        self.outbound = TransportQueue(self.encoder)
 
-    def __enter__(self) -> "Transport":
+    def __enter__(self) -> "Transport[T]":
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -109,20 +145,12 @@ class Transport(Generic[T]):
 
     async def _loop(self) -> None:
         inbound, outbound = self.inbound, self.outbound
+        connected = False
         while True:
             try:
                 async with asyncio.timeout(self.connection_timeout_secs):
                     reader, writer = await asyncio.open_connection(self.host, self.port)
-
-                async def write_lines(*ops: T) -> None:
-                    for op in ops:
-                        if not op:
-                            continue
-                        encoded = self.encoder.encode(op)
-                        if encoded is None:
-                            continue
-                        writer.write(str(encoded).encode("ascii") + b"\r\n")
-                        await writer.drain()
+                connected = True
 
                 async def pull_inbound() -> None:
                     try:
@@ -143,23 +171,46 @@ class Transport(Generic[T]):
                                 continue
 
                             self._trace(f"<-- {line}: {op}")
-                            await inbound.put(op)
+                            inbound.push(op, encoded=line_data)
+                    except asyncio.CancelledError:
+                        pass
                     except Exception as exc:
                         logger.exception("Error while reading lines: %s", exc)
                         writer.close()
-                    except asyncio.CancelledError:
-                        pass
+                        raise
 
                 read_task = asyncio.create_task(pull_inbound())
+                pull_task: asyncio.Task[tuple[T, bytes]] | None = None
                 try:
                     while True:
-                        line = await outbound.pull()
-                        await write_lines(line)
+                        pull_task = asyncio.create_task(outbound.pull())
+                        done, pending = await asyncio.wait(
+                            {read_task, pull_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if read_task in done:
+                            if pull_task in pending:
+                                pull_task.cancel()
+                            error = read_task.exception()
+                            if error is not None:
+                                raise error
+                            raise ConnectionError("connection closed")
+
+                        op, encoded = pull_task.result()
+                        self._trace(f"--> {encoded.hex()}: {op}")
+                        writer.write(str(encoded).encode("ascii") + b"\r\n")
+                        await writer.drain()
                         outbound.task_done()
                 finally:
-                    read_task.cancel()
+                    if not read_task.done():
+                        read_task.cancel()
+                    if pull_task is not None and not pull_task.done():
+                        pull_task.cancel()
             except asyncio.QueueShutDown:
                 break
-            except Exception:
-                logger.exception("Connection error: %s")
+            except Exception as exc:
+                if connected:
+                    inbound.push(ConnectionInterrupted())
+                    connected = False
+                logger.exception("Connection error: %s", exc)
                 await asyncio.sleep(self.reconnection_wait_secs)

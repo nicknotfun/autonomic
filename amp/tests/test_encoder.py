@@ -7,10 +7,10 @@ import pytest
 from amp.byte_utils import HexBytes
 from amp.encoder import MessagePattern, PatternEncoder, SubclassEncoder
 from amp.exceptions import ParseUnderflowError
-from amp.types import ToggleBool
+from amp.toggle_bool import ToggleBool
 
 
-def test_message_pattern_parses_and_emits_core_types():
+def test_message_pattern_parses_and_emits_core_types() -> None:
     pattern = MessagePattern(
         "AA{:=BB}{number:4N}{raw:2X}{signed:S}{enabled:bool}"
         "{power:power_bool}{mute:mute_bool}{plain:utf8}!"
@@ -39,10 +39,10 @@ def test_message_pattern_parses_and_emits_core_types():
     }
 
 
-def test_message_pattern_parses_uuid_guid_float_lenutf8_and_repeats():
+def test_message_pattern_parses_uuid_guid_float_lenutf8_and_repeats() -> None:
     value = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
     pattern = MessagePattern("{normal:uuid}{wire:guid}{gain:float(160,0.0,1.0)}{name:lenutf8}{items:N*}!")
-    message = SimpleNamespace(normal=value, wire=value, gain=0.5, name="Amp", items=[1, 2])
+    message = SimpleNamespace(normal=value, wire=value, gain=0.5, name="Amp", items=(1, 2))
 
     encoded = pattern.emit(message)
 
@@ -54,11 +54,11 @@ def test_message_pattern_parses_uuid_guid_float_lenutf8_and_repeats():
         "wire": value,
         "gain": 0.5,
         "name": "Amp",
-        "items": [1, 2],
+        "items": (1, 2),
     }
 
 
-def test_optional_fields_are_absent_only_on_underflow():
+def test_optional_fields_are_absent_only_on_underflow() -> None:
     pattern = MessagePattern("{enabled:bool?}!")
 
     assert pattern.parse(b"") == {"enabled": None}
@@ -67,15 +67,15 @@ def test_optional_fields_are_absent_only_on_underflow():
         pattern.parse(HexBytes("02"))
 
 
-def test_plus_repeat_requires_at_least_one_value():
+def test_plus_repeat_requires_at_least_one_value() -> None:
     pattern = MessagePattern("{items:N+}!")
 
-    assert pattern.parse(HexBytes("0102")) == {"items": [1, 2]}
+    assert pattern.parse(HexBytes("0102")) == {"items": (1, 2)}
     with pytest.raises(ParseUnderflowError, match="at least 1"):
         pattern.parse(b"")
 
 
-def test_consumes_all_marker_rejects_extra_input():
+def test_consumes_all_marker_rejects_extra_input() -> None:
     strict = MessagePattern("AA{value:N}!")
     loose = MessagePattern("AA{value:N}")
 
@@ -95,7 +95,7 @@ def test_consumes_all_marker_rejects_extra_input():
         ("{value:3S}", "multiple of 2"),
     ],
 )
-def test_message_pattern_rejects_invalid_patterns(pattern: str, message: str):
+def test_message_pattern_rejects_invalid_patterns(pattern: str, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         MessagePattern(pattern)
 
@@ -109,17 +109,17 @@ def test_message_pattern_rejects_invalid_patterns(pattern: str, message: str):
         ("{value:bool}!", SimpleNamespace(value=1), "expected bool"),
         ("{value:utf8}!", SimpleNamespace(value=b"x"), "expected str"),
         ("{value:lenutf8}!", SimpleNamespace(value="x" * 32), "too long"),
-        ("{value:N*}!", SimpleNamespace(value=1), "expected list"),
+        ("{value:N*}!", SimpleNamespace(value=1), "expected tuple"),
     ],
 )
 def test_message_pattern_validates_emitted_values(
     pattern: str, message: SimpleNamespace, error: str
-):
+) -> None:
     with pytest.raises(ValueError, match=error):
         MessagePattern(pattern).emit(message)
 
 
-def test_pattern_encoder_uses_class_pattern_by_default():
+def test_pattern_encoder_uses_class_pattern_by_default() -> None:
     @dataclass(kw_only=True, frozen=True)
     class Example:
         PATTERN = "AA{value:N}!"
@@ -133,7 +133,7 @@ def test_pattern_encoder_uses_class_pattern_by_default():
     assert encoder.decode(HexBytes("AA03")) == Example(value=3)
 
 
-def test_pattern_encoder_accepts_explicit_pattern_and_validates_class_pattern():
+def test_pattern_encoder_accepts_explicit_pattern_and_validates_class_pattern() -> None:
     class NoPattern:
         pass
 
@@ -147,7 +147,7 @@ def test_pattern_encoder_accepts_explicit_pattern_and_validates_class_pattern():
         PatternEncoder(BadPattern)
 
 
-def test_subclass_encoder_discovers_encodes_and_decodes_direct_subclasses():
+def test_subclass_encoder_discovers_encodes_and_decodes_direct_subclasses() -> None:
     class Base:
         pass
 
@@ -170,7 +170,7 @@ def test_subclass_encoder_discovers_encodes_and_decodes_direct_subclasses():
     assert encoder.decode(HexBytes("CC")) is None
 
 
-def test_subclass_encoder_skips_subclasses_with_invalid_patterns():
+def test_subclass_encoder_skips_subclasses_with_invalid_patterns() -> None:
     class Base:
         pass
 

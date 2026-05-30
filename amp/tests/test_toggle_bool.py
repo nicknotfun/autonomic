@@ -2,7 +2,7 @@ import pytest
 
 from amp.byte_utils import HexBytes
 from amp.exceptions import ParseUnderflowError
-from amp.types import ToggleBool
+from amp.toggle_bool import ToggleBool
 
 
 @pytest.mark.parametrize(
@@ -13,7 +13,7 @@ from amp.types import ToggleBool
         (ToggleBool.Toggle, "Toggle"),
     ],
 )
-def test_toggle_bool_string_forms(value: ToggleBool, text: str):
+def test_toggle_bool_string_forms(value: ToggleBool, text: str) -> None:
     assert str(value) == text
     assert repr(value) == text
 
@@ -26,7 +26,7 @@ def test_toggle_bool_string_forms(value: ToggleBool, text: str):
         (ToggleBool.Toggle, "04", "02"),
     ],
 )
-def test_toggle_bool_wire_encodings(value: ToggleBool, power: str, mute: str):
+def test_toggle_bool_wire_encodings(value: ToggleBool, power: str, mute: str) -> None:
     assert value.as_power() == HexBytes(power)
     assert value.as_mute() == HexBytes(mute)
 
@@ -44,7 +44,7 @@ def test_toggle_bool_wire_encodings(value: ToggleBool, power: str, mute: str):
 )
 def test_toggle_bool_consumes_ints_and_single_byte_hex(
     wire_value: int | HexBytes, expected: ToggleBool
-):
+) -> None:
     assert ToggleBool.consume(wire_value) is expected
 
 
@@ -61,16 +61,16 @@ def test_toggle_bool_consumes_ints_and_single_byte_hex(
 )
 def test_toggle_bool_consumes_mute_values_with_inverted_polarity(
     wire_value: int | HexBytes, expected: ToggleBool
-):
+) -> None:
     assert ToggleBool.consume(wire_value, for_mute=True) is expected
 
 
-def test_toggle_bool_rejects_multi_byte_hex():
+def test_toggle_bool_rejects_multi_byte_hex() -> None:
     with pytest.raises(ParseUnderflowError, match="single byte"):
         ToggleBool.consume(HexBytes("0001"))
 
 
-def test_toggle_bool_rejects_unknown_values():
+def test_toggle_bool_rejects_unknown_values() -> None:
     with pytest.raises(ValueError, match="invalid power value"):
         ToggleBool.consume(0x02)
     with pytest.raises(ValueError, match="invalid mute value"):
