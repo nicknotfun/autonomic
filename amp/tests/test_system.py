@@ -81,7 +81,7 @@ def test_input_physical_source_id_maps_logical_selectors() -> None:
         source = InputState(
             device_id=HexBytes("00D4"),
             selector=selector,
-            name="Input",
+            assigned_name="Input",
             hidden_name=None,
         )
 
@@ -104,7 +104,7 @@ def test_input_physical_source_id_ignores_remote_selectors() -> None:
     source = InputState(
         device_id=HexBytes("00D4"),
         selector=0x20,
-        name="Remote",
+        assigned_name="Remote",
         hidden_name=None,
     )
 
@@ -116,21 +116,48 @@ def test_input_remote_selector_range_stops_before_casting_selectors() -> None:
     assert InputState(
         device_id=HexBytes("00D4"),
         selector=0x20,
-        name="Remote 20",
+        assigned_name="Remote 20",
         hidden_name=None,
     ).remote
     assert InputState(
         device_id=HexBytes("00D4"),
         selector=0x4F,
-        name="Remote 4F",
+        assigned_name="Remote 4F",
         hidden_name=None,
     ).remote
     assert not InputState(
         device_id=HexBytes("6012"),
         selector=0x50,
-        name="Casting",
+        assigned_name="Casting",
         hidden_name=None,
     ).remote
+
+
+def test_input_name_prefers_assigned_name_over_hardware_name() -> None:
+    source = InputState(device_id=HexBytes("00D4"), selector=0x02)
+
+    assert source.name == "Input 02"
+    assert source.name_discovered is False
+
+    source.apply_hardware_name("OPT1")
+
+    assert source.hardware_name == "OPT1"
+    assert source.name == "OPT1"
+    assert source.name_discovered is False
+
+    source.name = "W1"
+    source.apply_hardware_name("Optical 1")
+
+    assert source.assigned_name == "W1"
+    assert source.hardware_name == "Optical 1"
+    assert source.name == "W1"
+    assert source.name_discovered is True
+
+    source.name = None
+
+    assert source.assigned_name is None
+    assert source.name == "Optical 1"
+    assert source.name_discovered is False
 
 
 def test_device_tracks_missing_read_only_update_ops_and_readbacks() -> None:
@@ -345,11 +372,13 @@ def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None
             assert device.output_count == 8
             input_a1 = system.state.inputs[(HexBytes("00D4"), 0x05)]
             assert input_a1.name == "A1"
-            assert input_a1.default_name == "A1"
+            assert input_a1.assigned_name == "A1"
+            assert input_a1.hardware_name == "A1"
             assert input_a1.name_discovered is True
             default_opt1 = system.state.inputs[(HexBytes("00D4"), 0x02)]
             assert default_opt1.name == "OPT1"
-            assert default_opt1.default_name == "OPT1"
+            assert default_opt1.assigned_name is None
+            assert default_opt1.hardware_name == "OPT1"
             assert default_opt1.name_discovered is False
             assert system.state.outputs[1].on is True
             assert system.state.outputs[1].name == "Kitchen"
@@ -746,7 +775,7 @@ def test_system_state_save_load_round_trips_json(tmp_path: Path) -> None:
 
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["devices"]["00D4"]["model_id"] == "B0"
-        assert data["inputs"]["00D4:0x05"]["name"] == "A1"
+        assert data["inputs"]["00D4:0x05"]["assigned_name"] == "A1"
         assert data["outputs"]["1"]["source"] == 0x05
         assert data["outputs"]["1"]["max_volume"] == 0.75
         assert data["remote_inputs"]["3"]["present"] is True
@@ -1105,7 +1134,8 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
             assert device.output_count == 8
             default_input = system.state.inputs[(HexBytes("00D4"), 0x02)]
             assert default_input.name == "OPT1"
-            assert default_input.default_name == "OPT1"
+            assert default_input.assigned_name is None
+            assert default_input.hardware_name == "OPT1"
             assert default_input.name_discovered is False
 
             async def complete_input_discovery() -> None:
@@ -1122,8 +1152,8 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
                     0x03: "A4",
                     0x00: "COAX1",
                     0x01: "COAX2",
-                    0x02: "Runtime OPT1",
-                    0x04: "OPT2",
+                    0x02: "W1",
+                    0x04: "W2",
                 }
                 for selector, name in runtime_names.items():
                     transport.push(
@@ -1144,9 +1174,14 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
             assert SourceNameDiscoveryOp(output=1) in [
                 op for batch in transport.sent for op in batch
             ]
-            assert default_input.name == "Runtime OPT1"
-            assert default_input.default_name == "OPT1"
+            assert default_input.name == "W1"
+            assert default_input.assigned_name == "W1"
+            assert default_input.hardware_name == "OPT1"
             assert default_input.name_discovered is True
+            opt2_input = system.state.inputs[(HexBytes("00D4"), 0x04)]
+            assert opt2_input.name == "W2"
+            assert opt2_input.assigned_name == "W2"
+            assert opt2_input.hardware_name == "OPT2"
         finally:
             system.shutdown()
             await asyncio.sleep(0)

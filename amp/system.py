@@ -108,10 +108,31 @@ LOGICAL_SELECTOR_BY_PHYSICAL_SOURCE_ID = {
 class InputState(VersionedState):
     device_id: HexBytes
     selector: int
-    name: str
-    hidden_name: str | None
-    default_name: str | None = None
-    name_discovered: bool = False
+    assigned_name: str | None = None
+    hidden_name: str | None = None
+    hardware_name: str | None = None
+
+    def __setattr__(self, field_name: str, value: Any) -> None:
+        if field_name == "name":
+            self.assigned_name = value
+            return
+        super().__setattr__(field_name, value)
+
+    @property
+    def name(self) -> str:
+        if self.assigned_name is not None:
+            return self.assigned_name
+        if self.hardware_name is not None:
+            return self.hardware_name
+        return f"Input {self.selector:02X}"
+
+    @name.setter
+    def name(self, value: str | None) -> None:
+        self.assigned_name = value
+
+    @property
+    def name_discovered(self) -> bool:
+        return self.assigned_name is not None
 
     @property
     def remote(self) -> bool:
@@ -145,18 +166,11 @@ class InputState(VersionedState):
     def update(self, op: SourceNameOp) -> None:
         if op.name is None:
             return
-        self.name = op.name
+        self.assigned_name = op.name
         self.hidden_name = op.hidden_name
-        self.name_discovered = True
 
-    def apply_default_name(self, name: str) -> None:
-        old_default_name = self.default_name
-        self.default_name = name
-        if self.name_discovered:
-            return
-        generic_name = f"Input {self.selector:02X}"
-        if self.name == generic_name or self.name == old_default_name:
-            self.name = name
+    def apply_hardware_name(self, name: str) -> None:
+        self.hardware_name = name
 
 
 class OutputState(VersionedState):
@@ -248,8 +262,6 @@ class SystemState(VersionTrackerMixin):
             lambda device_and_selector: InputState(
                 device_id=device_and_selector[0],
                 selector=device_and_selector[1],
-                name=f"Input {device_and_selector[1]:02X}",
-                hidden_name=None,
             ),
             tracker=self,
         )
@@ -470,7 +482,7 @@ class System(VersionTrackerMixin):
             if model is None:
                 continue
             for source in model.sources:
-                self.state.inputs[(device.id, source.selector)].apply_default_name(source.name)
+                self.state.inputs[(device.id, source.selector)].apply_hardware_name(source.name)
 
     def outputs_by_input(self, source_input: InputState) -> list[OutputState]:
         outputs = []

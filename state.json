@@ -1,11 +1,13 @@
 {
   "devices": {
     "00D4": {
-      "version": 5,
-      "updated_at": "2026-05-31T18:17:33.270236Z",
+      "version": 8,
+      "updated_at": "2026-06-01T02:53:19.350260Z",
+      "host": "10.1.0.200",
       "firmware": 6,
       "model_id": "B0",
-      "input_count": null,
+      "input_count": 8,
+      "output_count": 8,
       "outputs": [
         1,
         2,
@@ -20,11 +22,13 @@
       "guid": "674e1900-f8a9-f6be-a465-3d0fbee12977"
     },
     "6012": {
-      "version": 6,
-      "updated_at": "2026-05-31T18:17:28.176844Z",
+      "version": 7,
+      "updated_at": "2026-06-01T02:53:19.662395Z",
+      "host": null,
       "firmware": 8,
       "model_id": "E9",
       "input_count": 19,
+      "output_count": 8,
       "outputs": [
         9,
         10,
@@ -39,18 +43,224 @@
       "guid": "6c126887-df88-bd41-abbd-079c4e743694"
     }
   },
-  "inputs": {},
-  "outputs": {
-    "9": {
-      "version": 0,
-      "updated_at": "2026-05-31T18:17:28.176862Z",
-      "name": null,
-      "on": null,
-      "muted": null,
-      "source": null,
-      "volume": null,
-      "max_volume": null
+  "inputs": {
+    "00D4:0x00": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346582Z",
+      "name": "COAX1",
+      "hidden_name": null,
+      "default_name": "COAX1",
+      "name_discovered": false
+    },
+    "00D4:0x01": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346664Z",
+      "name": "COAX2",
+      "hidden_name": null,
+      "default_name": "COAX2",
+      "name_discovered": false
+    },
+    "00D4:0x02": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346758Z",
+      "name": "OPT1",
+      "hidden_name": null,
+      "default_name": "OPT1",
+      "name_discovered": false
+    },
+    "00D4:0x03": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346500Z",
+      "name": "A4",
+      "hidden_name": null,
+      "default_name": "A4",
+      "name_discovered": false
+    },
+    "00D4:0x04": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346839Z",
+      "name": "OPT2",
+      "hidden_name": null,
+      "default_name": "OPT2",
+      "name_discovered": false
+    },
+    "00D4:0x05": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346232Z",
+      "name": "A1",
+      "hidden_name": null,
+      "default_name": "A1",
+      "name_discovered": false
+    },
+    "00D4:0x06": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346324Z",
+      "name": "A2",
+      "hidden_name": null,
+      "default_name": "A2",
+      "name_discovered": false
+    },
+    "00D4:0x07": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.346414Z",
+      "name": "A3",
+      "hidden_name": null,
+      "default_name": "A3",
+      "name_discovered": false
+    },
+    "6012:0x00": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408347Z",
+      "name": "Analog 2",
+      "hidden_name": null,
+      "default_name": "Analog 2",
+      "name_discovered": false
+    },
+    "6012:0x01": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408426Z",
+      "name": "Analog 3",
+      "hidden_name": null,
+      "default_name": "Analog 3",
+      "name_discovered": false
+    },
+    "6012:0x02": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408514Z",
+      "name": "Analog 4",
+      "hidden_name": null,
+      "default_name": "Analog 4",
+      "name_discovered": false
+    },
+    "6012:0x03": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408267Z",
+      "name": "Analog 1",
+      "hidden_name": null,
+      "default_name": "Analog 1",
+      "name_discovered": false
+    },
+    "6012:0x04": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408594Z",
+      "name": "Coaxial 1",
+      "hidden_name": null,
+      "default_name": "Coaxial 1",
+      "name_discovered": false
+    },
+    "6012:0x05": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408017Z",
+      "name": "Player_A",
+      "hidden_name": null,
+      "default_name": "Player_A",
+      "name_discovered": false
+    },
+    "6012:0x06": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408101Z",
+      "name": "Player_B",
+      "hidden_name": null,
+      "default_name": "Player_B",
+      "name_discovered": false
+    },
+    "6012:0x07": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408186Z",
+      "name": "Player_C",
+      "hidden_name": null,
+      "default_name": "Player_C",
+      "name_discovered": false
+    },
+    "6012:0x08": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408672Z",
+      "name": "Coaxial 2",
+      "hidden_name": null,
+      "default_name": "Coaxial 2",
+      "name_discovered": false
+    },
+    "6012:0x09": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408760Z",
+      "name": "Optical 1",
+      "hidden_name": null,
+      "default_name": "Optical 1",
+      "name_discovered": false
+    },
+    "6012:0x0A": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408843Z",
+      "name": "Optical 2",
+      "hidden_name": null,
+      "default_name": "Optical 2",
+      "name_discovered": false
+    },
+    "6012:0x0B": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408921Z",
+      "name": "Casting_1",
+      "hidden_name": null,
+      "default_name": "Casting_1",
+      "name_discovered": false
+    },
+    "6012:0x0C": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.408999Z",
+      "name": "Casting_2",
+      "hidden_name": null,
+      "default_name": "Casting_2",
+      "name_discovered": false
+    },
+    "6012:0x0D": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409083Z",
+      "name": "Casting_3",
+      "hidden_name": null,
+      "default_name": "Casting_3",
+      "name_discovered": false
+    },
+    "6012:0x0E": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409162Z",
+      "name": "Casting_4",
+      "hidden_name": null,
+      "default_name": "Casting_4",
+      "name_discovered": false
+    },
+    "6012:0x0F": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409251Z",
+      "name": "Casting_5",
+      "hidden_name": null,
+      "default_name": "Casting_5",
+      "name_discovered": false
+    },
+    "6012:0x50": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409334Z",
+      "name": "Casting_6",
+      "hidden_name": null,
+      "default_name": "Casting_6",
+      "name_discovered": false
+    },
+    "6012:0x51": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409413Z",
+      "name": "Casting_7",
+      "hidden_name": null,
+      "default_name": "Casting_7",
+      "name_discovered": false
+    },
+    "6012:0x52": {
+      "version": 2,
+      "updated_at": "2026-06-01T02:53:19.409491Z",
+      "name": "Casting_8",
+      "hidden_name": null,
+      "default_name": "Casting_8",
+      "name_discovered": false
     }
   },
+  "outputs": {},
   "remote_inputs": {}
 }

@@ -112,12 +112,14 @@ The maps preserve sorted iteration, so output is stable by device id,
 `InputState` tracks:
 
 - source selector and device id
-- current runtime name from source-name rows
-- `default_name` from hardware metadata when available
-- whether the runtime name has actually been discovered
+- `assigned_name` from source-name rows
+- `hardware_name` from hardware metadata when available
+- whether an assigned runtime name has actually been discovered
 
-Hardware default names are only defaults. Runtime source-name rows can override
-them, and discovery continues until runtime names have been observed. Remote
+Hardware names are only defaults. `InputState.name` dynamically returns
+`assigned_name`, then `hardware_name`, then a generic selector label. Discovery
+continues until assigned runtime names have been observed, so hardware names
+cannot complete discovery by themselves or override source-name rows. Remote
 source names are runtime configuration; they are not assumed from hardware model
 metadata.
 
