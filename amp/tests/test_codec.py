@@ -10,6 +10,8 @@ from amp.codec import (
     DelayOp,
     DeviceGuidOp,
     DeviceGuidQueryOp,
+    DeviceHostInfoDiscoveryOp,
+    DeviceHostInfoOp,
     DeviceIdDiscoveryOp,
     DeviceIdOp,
     DeviceInfoDiscoveryOp,
@@ -38,14 +40,15 @@ from amp.codec import (
     RemoteSourceDeleteOp,
     RemoteSourceDiscoveryOp,
     RemoteSourceInfoOp,
+    RemoteSourceSlotOp,
     SourceDelayStatusOp,
     SourceMetadataOp,
     SourceMetadataQueryOp,
     SourceNameDiscoveryOp,
     SourceNameOp,
     SourceSelectOp,
-    TrebleOp,
     ThisDeviceIdOp,
+    TrebleOp,
     UnknownOutputStatusOp,
     VolumeDownOp,
     VolumeOp,
@@ -116,6 +119,7 @@ def test_op_encoder_decoder_delegates_to_subclass_decode() -> None:
         (DeviceGuidQueryOp(device_id=HexBytes("00D4")), "3AFF00D485"),
         (OutputNameRefreshOp(), "38FF"),
         (DeviceIdDiscoveryOp(), "2FFF"),
+        (DeviceHostInfoDiscoveryOp(), "58FF00"),
         (SourceNameDiscoveryOp(output=9), "2909"),
         (SourceNameOp(output=9, source_selector=0x05), "290905"),
         (ZoneGroupOp(), "30FF20"),
@@ -138,13 +142,13 @@ def test_read_patterns_encode_in_read_only_mode(op: Op, encoded: str) -> None:
     [
         (PowerOp(output=1, is_on=ToggleBool.On), "010101"),
         (MuteOp(output=1, is_muted=ToggleBool.On), "020100"),
-        (SourceSelectOp(output=1, source=HexBytes("05")), "030105"),
+        (SourceSelectOp(output=1, source=0x05), "030105"),
         (VolumeOp(output=1, volume=0.5), "040150"),
         (BassOp(output=1, bass=-3), "0501FD"),
         (TrebleOp(output=1, treble=4), "060104"),
         (BalanceOp(output=1, balance=-10), "0701F6"),
         (LoudnessOp(output=1, is_loud=True), "0C0101"),
-        (MaxVolumeOp(output=1, max_volume=0xA0), "0D01A0"),
+        (MaxVolumeOp(output=1, max_volume=1.0), "0D01A0"),
         (VolumeUpOp(output=1), "1101"),
         (VolumeDownOp(output=1), "1201"),
         (DeviceGuidOp(device_id=HexBytes("00D4"), guid=GUID), f"3AFF00D405{GUID_WIRE}"),
@@ -183,20 +187,50 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str) -> None:
     assert str(OpEncoder(read_only=False).encode(op)) == encoded
 
 
+def test_remote_source_ops_share_slot_base() -> None:
+    ops = [
+        RemoteSourceDiscoveryOp(slot_id=3),
+        RemoteSourceInfoOp(
+            slot_id=3,
+            backing_device_guid=GUID,
+            source_index=6,
+            name="M6250 OPT1",
+        ),
+        RemoteSourceDeleteOp(slot_id=3),
+    ]
+
+    assert all(isinstance(op, RemoteSourceSlotOp) for op in ops)
+    assert [op.slot_id for op in ops] == [3, 3, 3]
+
+
+def test_device_host_info_exposes_both_observed_guid_orders() -> None:
+    op = DeviceHostInfoOp(
+        guid=UUID("8768126c-88df-41bd-abbd-079c4e743694"),
+        mac=HexBytes("ACE14F006012"),
+        detail=HexBytes("00"),
+    )
+
+    assert op.wire_guid == UUID("6c126887-df88-bd41-abbd-079c4e743694")
+    assert op.candidate_guids == (
+        UUID("8768126c-88df-41bd-abbd-079c4e743694"),
+        UUID("6c126887-df88-bd41-abbd-079c4e743694"),
+    )
+
+
 @pytest.mark.parametrize(
     ("encoded", "op"),
     [
         ("010104", PowerOp(output=1, is_on=ToggleBool.Toggle)),
         ("020100", MuteOp(output=1, is_muted=ToggleBool.On)),
         ("020101", MuteOp(output=1, is_muted=ToggleBool.Off)),
-        ("03010580", SourceSelectOp(output=1, source=HexBytes("05"), detail=(0x80,))),
+        ("03010580", SourceSelectOp(output=1, source=0x05, detail=(0x80,))),
         ("04011428", VolumeOp(output=1, volume=0.125, detail=(0x28,))),
         ("0501FD", BassOp(output=1, bass=-3)),
         ("060104", TrebleOp(output=1, treble=4)),
         ("0701F6", BalanceOp(output=1, balance=-10)),
         ("090100", OutputParametersRefreshOp(output=1, request=0)),
         ("0C01000E", LoudnessOp(output=1, is_loud=False, detail=(0x0E,))),
-        ("0D01A0C8", MaxVolumeOp(output=1, max_volume=0xA0, detail=(0xC8,))),
+        ("0D01A0C8", MaxVolumeOp(output=1, max_volume=1.0, detail=(0xC8,))),
         ("1101", VolumeUpOp(output=1)),
         ("1201", VolumeDownOp(output=1)),
         ("14FF06", DeviceInfoDiscoveryOp()),
@@ -235,7 +269,13 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str) -> None:
         ("1D0180", DiagnosticStatus1DOp(output=1, payload=HexBytes("80"))),
         ("1EFF00", DiagnosticStatus1EOp(output=ALL_OUTPUTS, payload=HexBytes("00"))),
         ("2FFF", DeviceIdDiscoveryOp()),
-        ("AFFF00D4010203", ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2, 3))),
+        (
+            "AFFF00D40102030405060708",
+            ThisDeviceIdOp(
+                device_id=HexBytes("00D4"),
+                zones=(1, 2, 3, 4, 5, 6, 7, 8),
+            ),
+        ),
         (
             "29FF054900004D4D532D3541204D",
             SourceNameOp(
@@ -291,6 +331,15 @@ def test_write_patterns_encode_when_enabled(op: Op, encoded: str) -> None:
         ),
         ("47FF0103", SourceMetadataQueryOp(source_selector=1, position=3)),
         ("48010000", UnknownOutputStatusOp(output=1, payload=HexBytes("0000"))),
+        ("58FF00", DeviceHostInfoDiscoveryOp()),
+        (
+            "58FF006C126887DF88BD41ABBD079C4E743694ACE14F00601200",
+            DeviceHostInfoOp(
+                guid=UUID("6c126887-df88-bd41-abbd-079c4e743694"),
+                mac=HexBytes("ACE14F006012"),
+                detail=HexBytes("00"),
+            ),
+        ),
         (
             "4AFF00D40102",
             DeviceStateOp(device_id=HexBytes("00D4"), state=HexBytes("0102")),

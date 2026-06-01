@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from amp.transport import ConnectionInterrupted, Transport, TransportQueue
+from amp.transport import ConnectionInterrupted, Transport, TransportQueue, TransportQueueClosed
 
 
 class DummyEncoder:
@@ -73,6 +73,20 @@ def test_transport_queue_dedupes_incomplete_items_until_task_done() -> None:
         assert await queue.pull() == ("second", b"second")
         queue.task_done()
         assert await queue.pull() == ("first-copy", b"first")
+
+    asyncio.run(scenario())
+
+
+def test_transport_queue_shutdown_wakes_waiters() -> None:
+    async def scenario() -> None:
+        queue: TransportQueue[str] = TransportQueue(DummyEncoder())
+        waiter = asyncio.create_task(queue.pull())
+
+        await asyncio.sleep(0)
+        queue.shutdown()
+
+        with pytest.raises(TransportQueueClosed):
+            await waiter
 
     asyncio.run(scenario())
 

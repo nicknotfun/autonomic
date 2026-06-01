@@ -1,0 +1,56 @@
+{
+  "devices": {
+    "00D4": {
+      "version": 5,
+      "updated_at": "2026-05-31T18:17:33.270236Z",
+      "firmware": 6,
+      "model_id": "B0",
+      "input_count": null,
+      "outputs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "mac": "ACE14F0055B4",
+      "guid": "674e1900-f8a9-f6be-a465-3d0fbee12977"
+    },
+    "6012": {
+      "version": 6,
+      "updated_at": "2026-05-31T18:17:28.176844Z",
+      "firmware": 8,
+      "model_id": "E9",
+      "input_count": 19,
+      "outputs": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "mac": "ACE14F006012",
+      "guid": "6c126887-df88-bd41-abbd-079c4e743694"
+    }
+  },
+  "inputs": {},
+  "outputs": {
+    "9": {
+      "version": 0,
+      "updated_at": "2026-05-31T18:17:28.176862Z",
+      "name": null,
+      "on": null,
+      "muted": null,
+      "source": null,
+      "volume": null,
+      "max_volume": null
+    }
+  },
+  "remote_inputs": {}
+}

@@ -91,6 +91,7 @@ connection.
 - `amp/toggle_bool.py`: shared power/mute toggle value type.
 - `amp/encoder.py`: declarative pattern compiler and subclass encoder.
 - `amp/codec.py`: protocol dataclasses and opcode patterns.
+- `amp/hardware.py`: observed hardware model metadata keyed by model number.
 - `amp/system.py`: read-only in-memory system model built from decoded rows.
 - `amp/transport.py`: async TCP row transport for port `17037`.
 - `amp/tests/`: tests split by `amp/*.py` module.

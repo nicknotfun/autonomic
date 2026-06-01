@@ -84,14 +84,14 @@ This table mirrors the dataclasses in `amp/codec.py`.
 | --- | --- | --- | --- |
 | `01` | `PowerOp` | `01{output:N}{is_on:power_bool?}!` | Read/write output power. |
 | `02` | `MuteOp` | `02{output:N}{is_muted:mute_bool?}!` | Mute polarity differs from power. |
-| `03` | `SourceSelectOp` | `03{output:N}{source:X?}{detail:N*}!` | Source select/status; extra status bytes are preserved. |
+| `03` | `SourceSelectOp` | `03{output:N}{source:N?}{detail:N*}!` | Source select/status; extra status bytes are preserved. |
 | `04` | `VolumeOp` | `04{output:N}{volume:float(160,0.0,1.0)?}{detail:N*}!` | Raw `00`-`A0` mapped to `0.0`-`1.0`. |
 | `05` | `BassOp` | `05{output:N}{bass:S?}!` | Signed byte. |
 | `06` | `TrebleOp` | `06{output:N}{treble:S?}!` | Signed byte. |
 | `07` | `BalanceOp` | `07{output:N}{balance:S?}!` | Signed byte. |
 | `09` | `OutputParametersRefreshOp` | `09{output:N}{request:N?}!` | Status refresh request, default payload `00`. |
 | `0C` | `LoudnessOp` | `0C{output:N}{is_loud:bool?}{detail:N*}!` | Extra status bytes are preserved. |
-| `0D` | `MaxVolumeOp` | `0D{output:N}{max_volume:N?}{detail:N*}!` | Raw max volume byte plus optional detail. |
+| `0D` | `MaxVolumeOp` | `0D{output:N}{max_volume:float(160,0.0,1.0)?}{detail:N*}!` | Raw `00`-`A0` mapped to `0.0`-`1.0`, plus optional detail. |
 | `11` | `VolumeUpOp` | `11{output:N}!` | Write-only command; usually followed by `04` status. |
 | `12` | `VolumeDownOp` | `12{output:N}!` | Write-only command; usually followed by `04` status. |
 | `14` | `DeviceInfoDiscoveryOp` | `14FF06!` | Model/device discovery query. |
@@ -115,14 +115,16 @@ This table mirrors the dataclasses in `amp/codec.py`.
 | `46` | `SourceMetadataOp` | `46{output:N}{source_selector:N}{position:N}{value:utf8}!` | Metadata set/readback. |
 | `47` | `SourceMetadataQueryOp` | `47{output:N}{source_selector:N}{position:N}!` | Requests `46` rows. |
 | `48` | `UnknownOutputStatusOp` | `48{output:N}{payload:hex}!` | Observed opaque output status. |
+| `58` | `DeviceHostInfoDiscoveryOp` | `58FF00!` | Host identity query observed during device discovery. |
+| `58` | `DeviceHostInfoOp` | `58FF00{guid:uuid}{mac:12X}{detail:hex}!` | Host identity row with MAC and GUID candidate bytes. |
 | `4A` | `DeviceStateOp` | `4AFF{device_id:4X}{state:hex?}!` | Opaque device state. |
 | `4D` | `DeviceLinkQueryOp` | `4DFF{device_id:4X}{linked:bool?}!` | Stack/link query/status. |
 | `4E` | `PresetGroupOp` | `4EFF{slot_id:4N}{payload:hex?}!` | Preset group map or slot payload. |
-| `4F` | `RemoteSourceDiscoveryOp` | `4FFF{slot_id:N?}!` | Remote source table query. |
+| `4F` | `RemoteSourceDiscoveryOp` | `4FFF{slot_id:N?}!` | Remote source table query; slots are `00` through `1F`. |
 | `4F` | `RemoteSourceInfoOp` | `4FFF{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!` | Remote source definition/readback. |
 | `4F` | `RemoteSourceDeleteOp` | `4FFF{slot_id:N}00!` | Remote source delete. |
 | `94` | `DeviceInfoOp` | `94FF00{firmware:N}{model_id}{device_id:4X}{zones:N+}!` | Model/device discovery response. |
-| `AF` | `ThisDeviceIdOp` | `AFFF{device_id:4X}{zones:N*}!` | Device-id response. |
+| `AF` | `ThisDeviceIdOp` | `AFFF{device_id:4X}{zones:N*}!` | Current transport's local device-id response. |
 | `B9` | `ExtendedDeviceInfoOp` | `B9FF{prefix:4X}{device_id:4X}{model_info:18X}{mac:12X}{detail:hex}!` | Extended identity; preserves opaque prefix/model/detail bytes while extracting device id and MAC. |
 | `CD` | `DeviceLinkOp` | `CDFF{device_id:4X}{linked:bool?}!` | Alternate stack/link row. |
 
@@ -142,9 +144,7 @@ Bass, treble, balance, and output gain are signed one-byte values. For example,
 `FD` decodes to `-3`.
 
 Output-name rows with no payload, such as `1C0D`, are valid readbacks for known
-unnamed outputs. `amp.system.System.discover_outputs(only_named=True)` first
-resolves names, then skips status refresh for outputs whose known name is an
-empty string.
+unnamed outputs.
 
 Source-name discovery is output-addressed even when names are shared across an
 amplifier's outputs. Query one representative output for each source table
@@ -162,14 +162,13 @@ Discovery sends only read/query operations through the default read-only encoder
 
 - device discovery: `14`, `2F`, `39`, `3A ... 85`, and `32 ... FF` query rows
 - input discovery: representative-output `29` source-name queries
-- output discovery: `38`, `01`, `02`, `03`, and `04` query rows
+- output discovery: `38`, `01`, `02`, `03`, `04`, and `0D` query rows
 
 The system model does not issue GUID repair/write rows or other identity-repair
 operations.
 
-When `System` receives `ConnectionInterrupted`, it calls `refresh()` and queues
-the same read-only device/output gap-fill and dynamic output-status queries used
-by manual refresh.
+When `System` receives `ConnectionInterrupted`, it queues the same read-only
+device/output gap-fill and dynamic output-status queries used by manual refresh.
 
 ### Source Selector Bytes
 
@@ -246,6 +245,11 @@ the M6250 `AF` row from `.200`; `.201` did not return a `2F` row during the
 focused probe. `39FF00D4`, `39FF6012`, `3AFF00D485`, and `3AFF601285`
 returned the MAC/GUID data above from both endpoints.
 
+`58FF00` identity rows decode as `DeviceHostInfoOp`. They carry a MAC and GUID
+candidate bytes, but they are not treated as proof that the row's device is
+local to the transport that emitted it; `AFFF...` and concrete output readbacks
+are used for direct transport ownership.
+
 Observed source-name tables:
 
 | Output query | Device/source table | Rows | Notes |
@@ -274,10 +278,9 @@ MA6 non-casting selectors observed on output bytes `09` through `10` hex:
 
 MA6 casting selectors observed were `0B`-`0F` and `50`-`52`.
 
-Focused `discover_outputs(only_named=True)` probing against `.201` also showed
-outputs `0D`-`10` returning empty names (`1C0D`, `1C0E`, `1C0F`, `1C10`). Those
-are currently treated as known unnamed outputs and skipped by named-only status
-refresh.
+Focused output-name probing against `.201` also showed outputs `0D`-`10`
+returning empty names (`1C0D`, `1C0E`, `1C0F`, `1C10`). Those are currently
+treated as known unnamed outputs.
 
 Remote-source and `3A` GUID fields use Autonomic/Windows GUID order, not RFC
 UUID byte order:

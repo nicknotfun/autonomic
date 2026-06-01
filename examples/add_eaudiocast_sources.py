@@ -1,81 +1,71 @@
-# Example CLI for adding cross-amplifier eAudioCast source slots.
 from __future__ import annotations
 
 import argparse
+import asyncio
 from dataclasses import dataclass
-from typing import cast
+from uuid import UUID
 
-from autonomic import AutonomicClient
-from autonomic.config import ConfigMapping
+from _system_example import add_connection_args, discover_or_timeout, make_system, selected_hosts
 
-M6250_DEVICE = "00D4"
-MA6_DEVICE = "6012"
-
-M6250_OPT1 = f"{M6250_DEVICE}:OPT1"
-M6250_OPT2 = f"{M6250_DEVICE}:OPT2"
-MA6_ANALOG1 = f"{MA6_DEVICE}:Analog 1"
-MA6_OPT1 = f"{MA6_DEVICE}:Optical 1"
-MA6_OPT2 = f"{MA6_DEVICE}:Optical 2"
-
-EAUDIOCAST_CONFIG = cast(ConfigMapping, {
-    "direct_amplifier": {
-        "devices": [
-            {
-                "device_id": M6250_DEVICE,
-                "host": "10.1.0.200",
-                "guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
-                "output_start": 1,
-                "native_output_start": 1,
-                "model_byte": "0xB0",
-            },
-            {
-                "device_id": MA6_DEVICE,
-                "host": "10.1.0.201",
-                "guid": "6c126887-df88-bd41-abbd-079c4e743694",
-                "output_start": 9,
-                "native_output_start": 9,
-                "model_byte": "0xE9",
-            },
-        ],
-    }
-})
+from amp.byte_utils import HexBytes
+from amp.codec import RemoteSourceInfoOp
 
 
 @dataclass(frozen=True)
-class EAudioCastSource:
-    target_device_id: str
-    slot: int
-    source: str
+class RemoteSourceDefinition:
+    target_device_id: HexBytes
+    slot_id: int
+    backing_device_guid: UUID
+    source_index: int
     name: str
 
 
-EAUDIOCAST_SOURCES = (
-    EAudioCastSource(MA6_DEVICE, 0, M6250_OPT1, ".200 OPT1"),
-    EAudioCastSource(MA6_DEVICE, 1, M6250_OPT2, ".200 OPT2"),
-    EAudioCastSource(M6250_DEVICE, 0, MA6_OPT1, ".201 Optical 1"),
-    EAudioCastSource(M6250_DEVICE, 1, MA6_OPT2, ".201 Optical 2"),
-    EAudioCastSource(M6250_DEVICE, 2, MA6_ANALOG1, ".201 Analogue 1"),
-)
+def parse_definition(value: str) -> RemoteSourceDefinition:
+    try:
+        device_id, slot_id, guid, source_index, name = value.split(":", 4)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "expected TARGET_DEVICE:SLOT:BACKING_GUID:SOURCE_INDEX:NAME"
+        ) from exc
+    return RemoteSourceDefinition(
+        target_device_id=HexBytes(device_id),
+        slot_id=int(slot_id, 0),
+        backing_device_guid=UUID(guid),
+        source_index=int(source_index, 0),
+        name=name,
+    )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Add eAudioCast remote-source slots for the .200/.201 amp stack.")
+async def async_main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Define one or more eAudioCast remote-source slots."
+    )
+    add_connection_args(parser, write=True)
     parser.add_argument(
-        "host",
-        nargs="?",
-        default="10.1.0.200",
-        help="Autonomic device hostname or IP address. Defaults to 10.1.0.200.",
+        "definitions",
+        nargs="+",
+        type=parse_definition,
+        metavar="TARGET:SLOT:GUID:SOURCE_INDEX:NAME",
+        help="Remote source definition, for example 6012:0:674e1900-f8a9-f6be-a465-3d0fbee12977:6:.200 OPT1",
     )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host, config=EAUDIOCAST_CONFIG) as client:
-        for item in EAUDIOCAST_SOURCES:
-            client.define_eaudiocast_source(
-                target_device_id=item.target_device_id,
-                slot=item.slot,
-                source=item.source,
-                name=item.name,
+    with make_system(selected_hosts(args), read_only=False, trace=args.trace) as system:
+        await discover_or_timeout(system, args)
+        for definition in args.definitions:
+            op = RemoteSourceInfoOp(
+                slot_id=definition.slot_id,
+                backing_device_guid=definition.backing_device_guid,
+                source_index=definition.source_index,
+                name=definition.name,
             )
+            transport = system.transport_for_device_id(definition.target_device_id) or system.transport
+            system.send_ops(op, transport=transport)
+        await asyncio.sleep(args.settle)
+
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

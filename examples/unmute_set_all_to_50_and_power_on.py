@@ -1,25 +1,35 @@
-# Example CLI for unmuting every zone, setting volume to 50, and powering on.
 from __future__ import annotations
 
 import argparse
+import asyncio
 
-from autonomic import AutonomicClient
+from _system_example import add_connection_args, discover_or_timeout, make_system, selected_hosts
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Unmute every zone, set volume to 50 percent, and power on.")
+async def async_main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Enable, unmute, and set every discovered output to one volume."
+    )
+    add_connection_args(parser, write=True)
     parser.add_argument(
-        "host",
-        nargs="?",
-        default="10.1.0.200",
-        help="Autonomic device hostname or IP address. Defaults to 10.1.0.200.",
+        "--volume",
+        type=float,
+        default=0.5,
+        help="Volume on the AMP 0.0-1.0 scale. Defaults to 0.5.",
     )
     args = parser.parse_args()
 
-    with AutonomicClient(args.host) as client:
-        client.all_on()
-        client.mute_all_outputs(False)
-        client.set_all_output_volume(50.0)
+    with make_system(selected_hosts(args), read_only=False, trace=args.trace) as system:
+        await discover_or_timeout(system, args)
+        all_outputs = system.all_outputs()
+        all_outputs.enable()
+        all_outputs.unmute()
+        all_outputs.set_volume(args.volume)
+        await asyncio.sleep(args.settle)
+
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

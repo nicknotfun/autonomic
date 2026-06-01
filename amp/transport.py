@@ -25,15 +25,23 @@ class ConnectionInterrupted:
     pass
 
 
+class TransportQueueClosed(Exception):
+    pass
+
+
 class TransportQueue(Generic[T]):
     def __init__(self, encoder: Encoder[Any]) -> None:
-        self._queue: asyncio.Queue[tuple[T, bytes]] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[T, bytes] | None] = asyncio.Queue()
         self._incomplete: list[tuple[T, bytes]] = []
         self._queued_encoded: set[bytes] = set()
+        self._closed = False
         self.encoder = encoder
 
     def shutdown(self) -> None:
-        self._queue.shutdown()
+        if self._closed:
+            return
+        self._closed = True
+        self._queue.put_nowait(None)
 
     def _encode(self, value: T) -> bytes | None:
         if isinstance(value, ConnectionInterrupted):
@@ -41,6 +49,8 @@ class TransportQueue(Generic[T]):
         return self.encoder.encode(value)
 
     def push(self, value: T, *, encoded: bytes | None = None) -> None:
+        if self._closed:
+            raise TransportQueueClosed
         if not value:
             return
         if encoded is None:
@@ -60,6 +70,8 @@ class TransportQueue(Generic[T]):
         if self._incomplete:
             return self._incomplete[0]
         value = await self._queue.get()
+        if value is None:
+            raise TransportQueueClosed
         self._incomplete.append(value)
         return value
 
@@ -116,7 +128,7 @@ class Transport(Generic[T]):
                     inbound.task_done()
             except asyncio.CancelledError:
                 break
-            except asyncio.QueueShutDown:
+            except TransportQueueClosed:
                 break
 
     def shutdown(self) -> None:
@@ -174,6 +186,8 @@ class Transport(Generic[T]):
                             inbound.push(op, encoded=line_data)
                     except asyncio.CancelledError:
                         pass
+                    except TransportQueueClosed:
+                        pass
                     except Exception as exc:
                         logger.exception("Error while reading lines: %s", exc)
                         writer.close()
@@ -206,11 +220,14 @@ class Transport(Generic[T]):
                         read_task.cancel()
                     if pull_task is not None and not pull_task.done():
                         pull_task.cancel()
-            except asyncio.QueueShutDown:
+            except TransportQueueClosed:
                 break
             except Exception as exc:
                 if connected:
-                    inbound.push(ConnectionInterrupted())
+                    try:
+                        inbound.push(ConnectionInterrupted())
+                    except TransportQueueClosed:
+                        break
                     connected = False
                 logger.exception("Connection error: %s", exc)
                 await asyncio.sleep(self.reconnection_wait_secs)

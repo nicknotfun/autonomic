@@ -1,26 +1,18 @@
-# Example CLI for restoring source names to model-specific low-level labels.
 from __future__ import annotations
 
 import argparse
 
-from autonomic import AutonomicClient
-
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Rename all direct amplifier sources to their device-default labels.")
-    parser.add_argument(
-        "host",
-        nargs="?",
-        default="10.1.0.200",
-        help="Autonomic device hostname or IP address. Defaults to 10.1.0.200.",
+    parser = argparse.ArgumentParser(
+        description="Source-default renaming is not currently represented by the amp System API."
     )
-    args = parser.parse_args()
-
-    with AutonomicClient(args.host) as client:
-        response = client.rename_sources_to_low_level_input_labels()
-
-    if response:
-        print(response)
+    parser.parse_args()
+    raise SystemExit(
+        "This old high-level example is not ported: amp can read source names and "
+        "encode SourceNameOp rows, but it does not yet carry the model-specific "
+        "default label tables needed to safely restore names."
+    )
 
 
 if __name__ == "__main__":

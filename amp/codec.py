@@ -44,9 +44,9 @@ class MuteOp(OutputOp):
 
 @dataclass(kw_only=True, frozen=True)
 class SourceSelectOp(OutputOp):
-    PATTERN: ClassVar[str] = "03{output:N}{source:X?}{detail:N*}!"
+    PATTERN: ClassVar[str] = "03{output:N}{source:N?}{detail:N*}!"
 
-    source: HexBytes | None = None
+    source: int | None = None
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
@@ -117,9 +117,9 @@ class LoudnessOp(OutputOp):
 
 @dataclass(kw_only=True, frozen=True)
 class MaxVolumeOp(OutputOp):
-    PATTERN: ClassVar[str] = "0D{output:N}{max_volume:N?}{detail:N*}!"
+    PATTERN: ClassVar[str] = "0D{output:N}{max_volume:float(160,0.0,1.0)?}{detail:N*}!"
 
-    max_volume: int | None = None
+    max_volume: float | None = None
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
@@ -384,6 +384,36 @@ class UnknownOutputStatusOp(OutputOp):
 
 
 @dataclass(kw_only=True, frozen=True)
+class DeviceHostInfoDiscoveryOp(Op):
+    PATTERN: ClassVar[str] = "58FF00!"
+
+    def is_write(self) -> bool:
+        return False
+
+
+@dataclass(kw_only=True, frozen=True)
+class DeviceHostInfoOp(Op):
+    PATTERN: ClassVar[str] = "58FF00{guid:uuid}{mac:12X}{detail:hex}!"
+
+    guid: UUID
+    mac: HexBytes
+    detail: HexBytes = HexBytes("")
+
+    @property
+    def wire_guid(self) -> UUID:
+        return UUID(bytes_le=self.guid.bytes)
+
+    @property
+    def candidate_guids(self) -> tuple[UUID, ...]:
+        if self.wire_guid == self.guid:
+            return (self.guid,)
+        return (self.guid, self.wire_guid)
+
+    def is_write(self) -> bool:
+        return False
+
+
+@dataclass(kw_only=True, frozen=True)
 class DeviceStateOp(DeviceIdOp):
     PATTERN: ClassVar[str] = "4AFF{device_id:4X}{state:hex?}!"
 
@@ -425,17 +455,20 @@ class PresetGroupOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class RemoteSourceDiscoveryOp(Op):
-    PATTERN: ClassVar[str] = "4FFF{slot_id:N?}!"
-
+class RemoteSourceSlotOp(Op):
     slot_id: int | None = None
+
+
+@dataclass(kw_only=True, frozen=True)
+class RemoteSourceDiscoveryOp(RemoteSourceSlotOp):
+    PATTERN: ClassVar[str] = "4FFF{slot_id:N?}!"
 
     def is_write(self) -> bool:
         return False
 
 
 @dataclass(kw_only=True, frozen=True)
-class RemoteSourceInfoOp(Op):
+class RemoteSourceInfoOp(RemoteSourceSlotOp):
     PATTERN: ClassVar[str] = "4FFF{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!"
 
     slot_id: int
@@ -448,7 +481,7 @@ class RemoteSourceInfoOp(Op):
 
 
 @dataclass(kw_only=True, frozen=True)
-class RemoteSourceDeleteOp(Op):
+class RemoteSourceDeleteOp(RemoteSourceSlotOp):
     PATTERN: ClassVar[str] = "4FFF{slot_id:N}00!"
 
     slot_id: int
