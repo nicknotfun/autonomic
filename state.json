@@ -2,7 +2,7 @@
   "devices": {
     "00D4": {
       "version": 8,
-      "updated_at": "2026-06-01T02:53:19.350260Z",
+      "updated_at": "2026-06-01T19:44:17.917190Z",
       "host": "10.1.0.200",
       "firmware": 6,
       "model_id": "B0",
@@ -22,9 +22,9 @@
       "guid": "674e1900-f8a9-f6be-a465-3d0fbee12977"
     },
     "6012": {
-      "version": 7,
-      "updated_at": "2026-06-01T02:53:19.662395Z",
-      "host": null,
+      "version": 8,
+      "updated_at": "2026-06-01T19:44:18.206740Z",
+      "host": "10.1.0.201",
       "firmware": 8,
       "model_id": "E9",
       "input_count": 19,
@@ -46,221 +46,668 @@
   "inputs": {
     "00D4:0x00": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346582Z",
-      "name": "COAX1",
+      "updated_at": "2026-06-01T19:44:18.308298Z",
+      "assigned_name": "COAX1",
       "hidden_name": null,
-      "default_name": "COAX1",
-      "name_discovered": false
+      "hardware_name": "COAX1"
     },
     "00D4:0x01": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346664Z",
-      "name": "COAX2",
+      "updated_at": "2026-06-01T19:44:18.308342Z",
+      "assigned_name": "COAX2",
       "hidden_name": null,
-      "default_name": "COAX2",
-      "name_discovered": false
+      "hardware_name": "COAX2"
     },
     "00D4:0x02": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346758Z",
-      "name": "OPT1",
+      "updated_at": "2026-06-01T19:44:18.308498Z",
+      "assigned_name": "W1",
       "hidden_name": null,
-      "default_name": "OPT1",
-      "name_discovered": false
+      "hardware_name": "OPT1"
     },
     "00D4:0x03": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346500Z",
-      "name": "A4",
+      "updated_at": "2026-06-01T19:44:18.307983Z",
+      "assigned_name": "A4",
       "hidden_name": null,
-      "default_name": "A4",
-      "name_discovered": false
+      "hardware_name": "A4"
     },
     "00D4:0x04": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346839Z",
-      "name": "OPT2",
+      "updated_at": "2026-06-01T19:44:18.308540Z",
+      "assigned_name": "W2",
       "hidden_name": null,
-      "default_name": "OPT2",
-      "name_discovered": false
+      "hardware_name": "OPT2"
     },
     "00D4:0x05": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346232Z",
-      "name": "A1",
+      "updated_at": "2026-06-01T19:44:18.214956Z",
+      "assigned_name": "A1",
       "hidden_name": null,
-      "default_name": "A1",
-      "name_discovered": false
+      "hardware_name": "A1"
     },
     "00D4:0x06": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346324Z",
-      "name": "A2",
+      "updated_at": "2026-06-01T19:44:18.214986Z",
+      "assigned_name": "A2",
       "hidden_name": null,
-      "default_name": "A2",
-      "name_discovered": false
+      "hardware_name": "A2"
     },
     "00D4:0x07": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.346414Z",
-      "name": "A3",
+      "updated_at": "2026-06-01T19:44:18.307944Z",
+      "assigned_name": "A3",
       "hidden_name": null,
-      "default_name": "A3",
-      "name_discovered": false
+      "hardware_name": "A3"
+    },
+    "00D4:0x20": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.308716Z",
+      "assigned_name": "W1",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x21": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.308829Z",
+      "assigned_name": "Player_A@ACE14F006012",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x22": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.308943Z",
+      "assigned_name": "W2",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x23": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.414531Z",
+      "assigned_name": "W3",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x24": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.414651Z",
+      "assigned_name": "W4",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x25": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.414770Z",
+      "assigned_name": "Passthrough In",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x26": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.414878Z",
+      "assigned_name": "Player_C@ACE14F006012",
+      "hidden_name": null,
+      "hardware_name": null
+    },
+    "00D4:0x27": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.414986Z",
+      "assigned_name": "Player_B@ACE14F006012",
+      "hidden_name": null,
+      "hardware_name": null
     },
     "6012:0x00": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408347Z",
-      "name": "Analog 2",
+      "updated_at": "2026-06-01T19:44:18.642173Z",
+      "assigned_name": "Analog 2",
       "hidden_name": null,
-      "default_name": "Analog 2",
-      "name_discovered": false
+      "hardware_name": "Analog 2"
     },
     "6012:0x01": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408426Z",
-      "name": "Analog 3",
+      "updated_at": "2026-06-01T19:44:18.642191Z",
+      "assigned_name": "Analog 3",
       "hidden_name": null,
-      "default_name": "Analog 3",
-      "name_discovered": false
+      "hardware_name": "Analog 3"
     },
     "6012:0x02": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408514Z",
-      "name": "Analog 4",
+      "updated_at": "2026-06-01T19:44:18.642207Z",
+      "assigned_name": "Analog 4",
       "hidden_name": null,
-      "default_name": "Analog 4",
-      "name_discovered": false
+      "hardware_name": "Analog 4"
     },
     "6012:0x03": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408267Z",
-      "name": "Analog 1",
+      "updated_at": "2026-06-01T19:44:18.642147Z",
+      "assigned_name": "Analog 1",
       "hidden_name": null,
-      "default_name": "Analog 1",
-      "name_discovered": false
+      "hardware_name": "Analog 1"
     },
     "6012:0x04": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408594Z",
-      "name": "Coaxial 1",
+      "updated_at": "2026-06-01T19:44:18.642222Z",
+      "assigned_name": "Coaxial 1",
       "hidden_name": null,
-      "default_name": "Coaxial 1",
-      "name_discovered": false
+      "hardware_name": "Coaxial 1"
     },
     "6012:0x05": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408017Z",
-      "name": "Player_A",
-      "hidden_name": null,
-      "default_name": "Player_A",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.632450Z",
+      "assigned_name": "Player_A",
+      "hidden_name": "Player_A@ACE14F006012",
+      "hardware_name": "Player_A"
     },
     "6012:0x06": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408101Z",
-      "name": "Player_B",
-      "hidden_name": null,
-      "default_name": "Player_B",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.635826Z",
+      "assigned_name": "Player_B",
+      "hidden_name": "Player_B@ACE14F006012",
+      "hardware_name": "Player_B"
     },
     "6012:0x07": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408186Z",
-      "name": "Player_C",
-      "hidden_name": null,
-      "default_name": "Player_C",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.635853Z",
+      "assigned_name": "Player_C",
+      "hidden_name": "Player_C@ACE14F006012",
+      "hardware_name": "Player_C"
     },
     "6012:0x08": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408672Z",
-      "name": "Coaxial 2",
+      "updated_at": "2026-06-01T19:44:18.642236Z",
+      "assigned_name": "Coaxial 2",
       "hidden_name": null,
-      "default_name": "Coaxial 2",
-      "name_discovered": false
+      "hardware_name": "Coaxial 2"
     },
     "6012:0x09": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408760Z",
-      "name": "Optical 1",
+      "updated_at": "2026-06-01T19:44:18.642250Z",
+      "assigned_name": "W3",
       "hidden_name": null,
-      "default_name": "Optical 1",
-      "name_discovered": false
+      "hardware_name": "Optical 1"
     },
     "6012:0x0A": {
       "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408843Z",
-      "name": "Optical 2",
+      "updated_at": "2026-06-01T19:44:18.642264Z",
+      "assigned_name": "W4",
       "hidden_name": null,
-      "default_name": "Optical 2",
-      "name_discovered": false
+      "hardware_name": "Optical 2"
     },
     "6012:0x0B": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408921Z",
-      "name": "Casting_1",
-      "hidden_name": null,
-      "default_name": "Casting_1",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.642289Z",
+      "assigned_name": "Casting_1",
+      "hidden_name": "Casting_1@ACE14F006012",
+      "hardware_name": "Casting_1"
     },
     "6012:0x0C": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.408999Z",
-      "name": "Casting_2",
-      "hidden_name": null,
-      "default_name": "Casting_2",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.643539Z",
+      "assigned_name": "Casting_2",
+      "hidden_name": "Casting_2@ACE14F006012",
+      "hardware_name": "Casting_2"
     },
     "6012:0x0D": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409083Z",
-      "name": "Casting_3",
-      "hidden_name": null,
-      "default_name": "Casting_3",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657217Z",
+      "assigned_name": "Casting_3",
+      "hidden_name": "Casting_3@ACE14F006012",
+      "hardware_name": "Casting_3"
     },
     "6012:0x0E": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409162Z",
-      "name": "Casting_4",
-      "hidden_name": null,
-      "default_name": "Casting_4",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657243Z",
+      "assigned_name": "Casting_4",
+      "hidden_name": "Casting_4@ACE14F006012",
+      "hardware_name": "Casting_4"
     },
     "6012:0x0F": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409251Z",
-      "name": "Casting_5",
-      "hidden_name": null,
-      "default_name": "Casting_5",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657266Z",
+      "assigned_name": "Casting_5",
+      "hidden_name": "Casting_5@ACE14F006012",
+      "hardware_name": "Casting_5"
     },
     "6012:0x50": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409334Z",
-      "name": "Casting_6",
-      "hidden_name": null,
-      "default_name": "Casting_6",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657287Z",
+      "assigned_name": "Casting_6",
+      "hidden_name": "Casting_6@ACE14F006012",
+      "hardware_name": "Casting_6"
     },
     "6012:0x51": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409413Z",
-      "name": "Casting_7",
-      "hidden_name": null,
-      "default_name": "Casting_7",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657308Z",
+      "assigned_name": "Casting_7",
+      "hidden_name": "Casting_7@ACE14F006012",
+      "hardware_name": "Casting_7"
     },
     "6012:0x52": {
-      "version": 2,
-      "updated_at": "2026-06-01T02:53:19.409491Z",
-      "name": "Casting_8",
-      "hidden_name": null,
-      "default_name": "Casting_8",
-      "name_discovered": false
+      "version": 3,
+      "updated_at": "2026-06-01T19:44:18.657329Z",
+      "assigned_name": "Casting_8",
+      "hidden_name": "Casting_8@ACE14F006012",
+      "hardware_name": "Casting_8"
     }
   },
-  "outputs": {},
-  "remote_inputs": {}
+  "outputs": {
+    "1": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415343Z",
+      "name": "Kitchen",
+      "on": false,
+      "muted": false,
+      "source": 38,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "2": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415357Z",
+      "name": "Dining",
+      "on": false,
+      "muted": false,
+      "source": 39,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "3": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415370Z",
+      "name": "Living",
+      "on": false,
+      "muted": false,
+      "source": 33,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "4": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415383Z",
+      "name": "Master",
+      "on": false,
+      "muted": false,
+      "source": 33,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "5": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415395Z",
+      "name": "Bathroom",
+      "on": false,
+      "muted": false,
+      "source": 6,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "6": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415408Z",
+      "name": "Foyer",
+      "on": false,
+      "muted": false,
+      "source": 36,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "7": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415421Z",
+      "name": "Sitting",
+      "on": false,
+      "muted": false,
+      "source": 6,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "8": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.415433Z",
+      "name": "Passthrough",
+      "on": false,
+      "muted": false,
+      "source": 6,
+      "volume": 0.0,
+      "max_volume": 1.0
+    },
+    "9": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445066Z",
+      "name": "Grill",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "10": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445080Z",
+      "name": "Patio West",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "11": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445093Z",
+      "name": "Patio East",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "12": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445107Z",
+      "name": "Pool",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "13": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445120Z",
+      "name": "",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "14": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445134Z",
+      "name": "",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "15": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445147Z",
+      "name": "",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    },
+    "16": {
+      "version": 6,
+      "updated_at": "2026-06-01T19:44:18.445160Z",
+      "name": "",
+      "on": false,
+      "muted": true,
+      "source": 9,
+      "volume": 0.5,
+      "max_volume": 1.0
+    }
+  },
+  "remote_inputs": {
+    "0": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415500Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 6,
+      "name": "W1"
+    },
+    "1": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415542Z",
+      "present": true,
+      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
+      "source_index": 0,
+      "name": "Player_A@ACE14F006012"
+    },
+    "2": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415581Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 7,
+      "name": "W2"
+    },
+    "3": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415620Z",
+      "present": true,
+      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
+      "source_index": 9,
+      "name": "W3"
+    },
+    "4": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415658Z",
+      "present": true,
+      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
+      "source_index": 10,
+      "name": "W4"
+    },
+    "5": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415703Z",
+      "present": true,
+      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
+      "source_index": 3,
+      "name": "Passthrough In"
+    },
+    "6": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415740Z",
+      "present": true,
+      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
+      "source_index": 2,
+      "name": "Player_C@ACE14F006012"
+    },
+    "7": {
+      "version": 4,
+      "updated_at": "2026-06-01T19:44:18.415835Z",
+      "present": true,
+      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
+      "source_index": 1,
+      "name": "Player_B@ACE14F006012"
+    },
+    "8": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415847Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "9": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415861Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "10": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415874Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "11": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415887Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "12": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415900Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "13": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415913Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "14": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415925Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "15": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415938Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "16": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415951Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "17": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415963Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "18": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415976Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "19": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.415988Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "20": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416000Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "21": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416015Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "22": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416028Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "23": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416044Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "24": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416059Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "25": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416071Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "26": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416084Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "27": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416096Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "28": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416108Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "29": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416121Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "30": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416133Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "31": {
+      "version": 1,
+      "updated_at": "2026-06-01T19:44:18.416145Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    }
+  }
 }

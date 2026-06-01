@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import logging
 from typing import (
     Any,
@@ -94,6 +95,7 @@ class Transport(Generic[T]):
         self.reconnection_wait_secs = reconnection_wait_secs
         self.connection_timeout_secs = connection_timeout_secs
         self._loop_task: asyncio.Task[None] | None = None
+        self._writer: asyncio.StreamWriter | None = None
         self.trace = trace
         self.encoder = encoder
 
@@ -108,8 +110,19 @@ class Transport(Generic[T]):
         )
 
     def _maybe_start_loop(self) -> None:
-        if self._loop_task is None:
+        if self._loop_task is None or self._loop_task.done():
             self._loop_task = asyncio.create_task(self._loop())
+            self._loop_task.add_done_callback(self._handle_loop_task_done)
+
+    def _handle_loop_task_done(self, task: asyncio.Future[None]) -> None:
+        if self._loop_task is task:
+            self._loop_task = None
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.exception("Transport loop exited unexpectedly: %s", exc)
 
     def send(self, *ops: T) -> None:
         self._maybe_start_loop()
@@ -132,15 +145,24 @@ class Transport(Generic[T]):
                 break
 
     def shutdown(self) -> None:
-        if self._loop_task is not None:
-            self._loop_task.cancel()
-            self._loop_task = None
+        loop_task = self._loop_task
+        if loop_task is not None:
+            loop_task.cancel()
+
+        if self._writer is not None:
+            self._writer.close()
 
         self.inbound.shutdown()
         self.inbound = TransportQueue(self.encoder)
 
         self.outbound.shutdown()
         self.outbound = TransportQueue(self.encoder)
+
+    async def aclose(self) -> None:
+        loop_task = self._loop_task
+        self.shutdown()
+        if loop_task is not None:
+            await asyncio.gather(loop_task, return_exceptions=True)
 
     def __enter__(self) -> "Transport[T]":
         return self
@@ -162,6 +184,7 @@ class Transport(Generic[T]):
             try:
                 async with asyncio.timeout(self.connection_timeout_secs):
                     reader, writer = await asyncio.open_connection(self.host, self.port)
+                self._writer = writer
                 connected = True
 
                 async def pull_inbound() -> None:
@@ -220,6 +243,19 @@ class Transport(Generic[T]):
                         read_task.cancel()
                     if pull_task is not None and not pull_task.done():
                         pull_task.cancel()
+                    writer.close()
+                    cleanup_tasks: list[asyncio.Task[Any]] = [read_task]
+                    if pull_task is not None:
+                        cleanup_tasks.append(pull_task)
+                    try:
+                        await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+                    finally:
+                        try:
+                            with suppress(Exception):
+                                await writer.wait_closed()
+                        finally:
+                            if self._writer is writer:
+                                self._writer = None
             except TransportQueueClosed:
                 break
             except Exception as exc:

@@ -152,6 +152,9 @@ def test_transport_emits_connection_interrupted_after_reader_disconnect(
             def close(self) -> None:
                 self.closed = True
 
+            async def wait_closed(self) -> None:
+                pass
+
         writers: list[FakeWriter] = []
 
         async def fake_open_connection(
@@ -182,6 +185,61 @@ def test_transport_emits_connection_interrupted_after_reader_disconnect(
             await receiver.aclose()
             transport.shutdown()
             await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_transport_shutdown_closes_active_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        connected = asyncio.Event()
+        closed = asyncio.Event()
+        waited_closed = asyncio.Event()
+        never_read = asyncio.Event()
+
+        class WaitingReader:
+            async def readuntil(self) -> bytes:
+                await never_read.wait()
+                return b""
+
+        class FakeWriter:
+            def write(self, data: bytes) -> None:
+                pass
+
+            async def drain(self) -> None:
+                pass
+
+            def close(self) -> None:
+                closed.set()
+
+            async def wait_closed(self) -> None:
+                waited_closed.set()
+
+        async def fake_open_connection(
+            host: str,
+            port: int,
+        ) -> tuple[WaitingReader, FakeWriter]:
+            connected.set()
+            return WaitingReader(), FakeWriter()
+
+        monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+        transport = Transport(
+            DummyEncoder(),
+            "127.0.0.1",
+            reconnection_wait_secs=0,
+            connection_timeout_secs=1,
+        )
+        receiver = transport.recv()
+        next_event = asyncio.create_task(receiver.__anext__())
+
+        await asyncio.wait_for(connected.wait(), timeout=1)
+        transport.shutdown()
+
+        await asyncio.wait_for(closed.wait(), timeout=1)
+        await asyncio.wait_for(waited_closed.wait(), timeout=1)
+        with pytest.raises(StopAsyncIteration):
+            await next_event
 
     asyncio.run(scenario())
 

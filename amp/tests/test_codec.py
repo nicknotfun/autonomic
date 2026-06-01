@@ -1,4 +1,5 @@
 from dataclasses import fields, is_dataclass
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -80,7 +81,7 @@ def test_codec_parameter_comments_cover_all_command_fields() -> None:
         field.name
         for cls in _command_classes()
         if is_dataclass(cls)
-        for field in fields(cls)
+        for field in fields(cast(Any, cls))
     }
 
     assert field_names <= set(codec.PARAMETER_COMMENTS)

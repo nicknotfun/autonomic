@@ -1,9 +1,9 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Hashable, Iterable
+from collections.abc import Awaitable, Callable, Hashable, Iterable
 from pathlib import Path
-from typing import Any, TypeAlias, TypeGuard, TypeVar, cast
+from typing import Any, Protocol, TypeAlias, TypeGuard, TypeVar, cast
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
@@ -344,8 +344,16 @@ class SystemState(VersionTrackerMixin):
 TransportArgument: TypeAlias = Transport[Command] | Iterable[Transport[Command]] | str | Iterable[str]
 
 
+class _AsyncCloseable(Protocol):
+    def aclose(self) -> Awaitable[None]: ...
+
+
 def _is_transport(value: object) -> TypeGuard[Transport[Command]]:
     return hasattr(value, "send") and hasattr(value, "recv") and hasattr(value, "shutdown")
+
+
+def _is_async_closeable(value: object) -> TypeGuard[_AsyncCloseable]:
+    return callable(getattr(value, "aclose", None))
 
 
 def _normalize_transport_argument(
@@ -425,11 +433,39 @@ class System(VersionTrackerMixin):
         for transport in self.transports:
             transport.shutdown()
 
+    async def _close_transport(self, transport: Transport[Command]) -> None:
+        if _is_async_closeable(transport):
+            await transport.aclose()
+        else:
+            transport.shutdown()
+
+    async def aclose(self) -> None:
+        tasks = tuple(self.tasks)
+        for task in tasks:
+            task.cancel()
+
+        close_results = await asyncio.gather(
+            *(self._close_transport(transport) for transport in self.transports),
+            return_exceptions=True,
+        )
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        for result in close_results:
+            if isinstance(result, BaseException):
+                raise result
+
     def __enter__(self) -> "System":
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.shutdown()
+
+    async def __aenter__(self) -> "System":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.aclose()
 
     def dump(self) -> None:
         print(f"Devices ({len(self.state.devices)}):")
@@ -541,14 +577,13 @@ class System(VersionTrackerMixin):
         transport: Transport[Command] | None,
     ) -> tuple[OutputState, ...]:
         if transport is not None:
+            devices = self._devices_for_transport_event(transport)
             output_ids = {
                 output_id
-                for device in self.state.devices.values()
-                if device.host == transport.host
+                for device in devices
                 for output_id in (device.outputs or ())
             }
-            if output_ids:
-                return tuple(self.state.outputs[output_id] for output_id in sorted(output_ids))
+            return tuple(self.state.outputs[output_id] for output_id in sorted(output_ids))
         return tuple(self.state.outputs.values())
 
     def send_ops(self, *ops: Command, transport: Transport[Command] | None = None) -> None:
@@ -587,6 +622,56 @@ class System(VersionTrackerMixin):
                     device.guid = op.guid
         return matched
 
+    def _note_device_host(
+        self,
+        device: DeviceState,
+        transport: Transport[Command] | None,
+    ) -> None:
+        if transport is not None and device.host is None:
+            device.host = transport.host
+
+    def _devices_for_transport_event(
+        self,
+        transport: Transport[Command],
+    ) -> tuple[DeviceState, ...]:
+        devices = tuple(
+            device for device in self.state.devices.values() if device.host == transport.host
+        )
+        if devices:
+            return devices
+
+        unhosted_devices = tuple(
+            device for device in self.state.devices.values() if device.host is None
+        )
+        if len(unhosted_devices) == 1:
+            device = unhosted_devices[0]
+            device.host = transport.host
+            return (device,)
+
+        return ()
+
+    def _devices_for_source_name_event(
+        self,
+        op: codec.SourceNameOptionsCommand,
+        transport: Transport[Command] | None,
+    ) -> tuple[DeviceState, ...]:
+        if op.output != ALL_OUTPUTS:
+            device = self.device_for_output(op.output)
+            if device is not None:
+                self._note_device_host(device, transport)
+                return (device,)
+            return ()
+
+        if transport is not None:
+            devices = self._devices_for_transport_event(transport)
+            if devices:
+                return devices
+
+        devices = tuple(self.state.devices.values())
+        if len(devices) == 1:
+            return devices
+        return ()
+
     def update(
         self,
         op: Command | ConnectionInterrupted,
@@ -601,10 +686,11 @@ class System(VersionTrackerMixin):
                 device.update(op)
                 self.apply_hardware_defaults()
             case codec.SourceNameOptionsCommand():
-                if source_device := self.device_for_output(op.output):
+                for source_device in self._devices_for_source_name_event(op, transport):
                     self.state.inputs[(source_device.id, op.source_selector)].update(op)
             case codec.DeviceIdCommand():
-                self.state.devices[op.device_id].update(op)
+                device = self.state.devices[op.device_id]
+                device.update(op)
                 self.apply_hardware_defaults()
                 self._apply_pending_device_host_info()
             case codec.UndocumentedHostIdentityCommandResponse():
@@ -630,8 +716,7 @@ class System(VersionTrackerMixin):
                 else:
                     if transport is not None:
                         if output_device := self.device_for_output(op.output):
-                            if output_device.host is None:
-                                output_device.host = transport.host
+                            self._note_device_host(output_device, transport)
                     self.state.outputs[op.output].update(op)
 
     async def _handle_events(self, transport: Transport[Command]) -> None:
@@ -708,9 +793,17 @@ class System(VersionTrackerMixin):
                 host_probe_ops.add(codec.RequestZoneAssignmentsCommand())
                 host_probe_ops.add(codec.UndocumentedHostIdentityCommand())
 
-            if has_enough_devices and not incomplete_devices and not missing_hosts:
+            if has_enough_devices and not incomplete_devices:
                 if best_effort_probe_ops or host_probe_ops:
                     self.send_ops(*(best_effort_probe_ops | host_probe_ops))
+                if missing_hosts:
+                    previous_version = self.version
+                    await self.wait_for_change(
+                        since_version=previous_version,
+                        timeout=time_between_probes_secs,
+                    )
+                    if self.version != previous_version:
+                        continue
                 break
 
             if not has_enough_devices:
@@ -931,15 +1024,29 @@ class System(VersionTrackerMixin):
     def all_outputs(self) -> "OutputSelector":
         return OutputSelector(self, ALL_OUTPUTS)
 
-    def input_by_name(self, name: str, *, prefer_remote: bool = True) -> "InputSelector":
+    def input_by_name(
+        self,
+        name: str,
+        *,
+        prefer_remote: bool = True,
+        include_hardware_names: bool = True,
+    ) -> "InputSelector":
         normalized_name = _normalize_name(name)
         for input in self.state.inputs.values():
             if prefer_remote and not input.remote:
                 continue
-            if _normalize_name(input.name) == normalized_name:
+            if _normalize_name(input.name) == normalized_name or (
+                include_hardware_names
+                and input.hardware_name is not None
+                and _normalize_name(input.hardware_name) == normalized_name
+            ):
                 return InputSelector(self, input.device_id, input.selector)
         if prefer_remote:
-            return self.input_by_name(name, prefer_remote=False)
+            return self.input_by_name(
+                name,
+                prefer_remote=False,
+                include_hardware_names=include_hardware_names,
+            )
         raise ValueError(f"Input with name {name} not found")
 
     def all_inputs(self) -> "tuple[InputSelector, ...]":

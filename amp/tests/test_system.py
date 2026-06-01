@@ -57,6 +57,7 @@ class FakeTransport:
         self.sent: list[tuple[Command, ...]] = []
         self.events: asyncio.Queue[Command | ConnectionInterrupted | None] = asyncio.Queue()
         self.shutdown_called = False
+        self.aclose_called = False
 
     def send(self, *ops: Command) -> None:
         self.sent.append(ops)
@@ -74,6 +75,11 @@ class FakeTransport:
     def shutdown(self) -> None:
         self.shutdown_called = True
         self.events.put_nowait(None)
+
+    async def aclose(self) -> None:
+        self.aclose_called = True
+        self.shutdown()
+        await asyncio.sleep(0)
 
 
 def test_input_physical_source_id_maps_logical_selectors() -> None:
@@ -329,6 +335,21 @@ def test_system_accepts_host_strings_and_builds_transports() -> None:
     asyncio.run(scenario())
 
 
+def test_system_async_context_manager_awaits_transport_close_and_event_tasks() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        async with System(transport) as system:  # type: ignore[arg-type]
+            tasks = tuple(system.tasks)
+            assert tasks
+            assert not tasks[0].done()
+
+        assert transport.aclose_called is True
+        assert transport.shutdown_called is True
+        assert all(task.done() for task in tasks)
+
+    asyncio.run(scenario())
+
+
 def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
@@ -429,6 +450,32 @@ def test_device_host_info_updates_matching_device_identity_without_setting_host(
     asyncio.run(scenario())
 
 
+def test_generic_device_id_readbacks_do_not_assign_transport_host() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport(host="10.1.0.201")
+        system = System(transport)  # type: ignore[arg-type]
+        try:
+            transport.push(
+                RequestDeviceInformationCommandResponse(
+                    firmware=8,
+                    model_id=HexBytes("E9"),
+                    device_id=HexBytes("6012"),
+                    zones=(9, 10),
+                )
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            device = system.state.devices[HexBytes("6012")]
+            assert device.host is None
+            assert device.outputs == (9, 10)
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport() -> None:
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
@@ -465,6 +512,41 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
 
             assert transport_200.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
             assert transport_201.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_all_outputs_source_name_event_updates_devices_for_transport_host() -> None:
+    async def scenario() -> None:
+        transport_200 = FakeTransport(host="10.1.0.200")
+        transport_201 = FakeTransport(host="10.1.0.201")
+        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        try:
+            device_200 = system.state.devices[HexBytes("00D4")]
+            device_200.host = "10.1.0.200"
+            device_200.outputs = (1, 2)
+            device_201 = system.state.devices[HexBytes("6012")]
+            device_201.host = "10.1.0.201"
+            device_201.outputs = (9, 10)
+
+            transport_201.push(
+                SourceNameOptionsCommand(
+                    output=ALL_OUTPUTS,
+                    source_selector=0x05,
+                    options=HexBytes("490000"),
+                    name="Player_A",
+                )
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert (HexBytes("00D4"), 0x05) not in system.state.inputs
+            input_201 = system.state.inputs[(HexBytes("6012"), 0x05)]
+            assert input_201.name == "Player_A"
+            assert input_201.assigned_name == "Player_A"
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -979,6 +1061,45 @@ def test_discover_devices_uses_this_device_id_to_map_each_transport_host() -> No
     asyncio.run(scenario())
 
 
+def test_discover_devices_continues_when_only_host_ownership_is_missing() -> None:
+    async def scenario() -> None:
+        transport_200 = FakeTransport(host="10.1.0.200")
+        transport_201 = FakeTransport(host="10.1.0.201")
+        state = SystemState()
+        device_200 = state.devices[HexBytes("00D4")]
+        device_200.firmware = 6
+        device_200.model_id = HexBytes("B0")
+        device_200.outputs = (1, 2)
+        device_200.guid = GUID
+        device_200.mac = HexBytes("ACE14F0055B4")
+        device_201 = state.devices[HexBytes("6012")]
+        device_201.firmware = 8
+        device_201.model_id = HexBytes("E9")
+        device_201.outputs = (9, 10)
+        device_201.guid = UUID("6c126887-df88-bd41-abbd-079c4e743694")
+        device_201.mac = HexBytes("ACE14F006012")
+        system = System((transport_200, transport_201), state=state)  # type: ignore[arg-type]
+        try:
+            await asyncio.wait_for(
+                system.discover_devices(target_devices=2, time_between_probes_secs=0),
+                timeout=1,
+            )
+
+            assert state.devices[HexBytes("00D4")].needed_update_ops() == []
+            assert state.devices[HexBytes("6012")].needed_update_ops() == []
+            assert any(
+                RequestZoneAssignmentsCommand() in batch for batch in transport_200.sent
+            )
+            assert any(
+                UndocumentedHostIdentityCommand() in batch for batch in transport_201.sent
+            )
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_discover_devices_waits_for_missing_multi_transport_hosts() -> None:
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
@@ -1145,6 +1266,13 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
             assert default_input.assigned_name == "W1"
             assert default_input.hardware_name == "OPT1"
             assert default_input.name_discovered is True
+            assert system.input_by_name("OPT1").selector == 0x02
+            try:
+                system.input_by_name("OPT1", include_hardware_names=False)
+            except ValueError as exc:
+                assert "OPT1" in str(exc)
+            else:
+                raise AssertionError("hardware-name fallback should be optional")
             opt2_input = system.state.inputs[(HexBytes("00D4"), 0x04)]
             assert opt2_input.name == "W2"
             assert opt2_input.assigned_name == "W2"

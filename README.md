@@ -76,7 +76,7 @@ from amp.system import System
 
 
 async def main() -> None:
-    with System(("10.1.0.200", "10.1.0.201")) as system:
+    async with System(("10.1.0.200", "10.1.0.201")) as system:
         await system.discover(target_devices=2)
         system.dump()
 
@@ -87,7 +87,10 @@ asyncio.run(main())
 `System` accepts a host string, an iterable of host strings, an existing
 transport, or an iterable of transports. It starts transport event tasks during
 construction, so create it inside an active asyncio event loop. Pass
-`read_only=False` when constructing a write-enabled system.
+`read_only=False` when constructing a write-enabled system. Prefer
+`async with System(...)` or `await system.aclose()` when cleanup must wait for
+listener and transport tasks to finish; the synchronous context manager still
+performs best-effort shutdown.
 
 ## System State
 
@@ -203,8 +206,6 @@ Example scripts live under [examples/](examples):
 - `set_all_zones_to_200_opt1.py`: route known M6250/MA6 devices by input name.
 - `unmute_set_all_to_50_and_power_on.py`: enable, unmute, and set volume.
 - `add_eaudiocast_sources.py`: define remote source slots.
-- `rename_sources_to_device_defaults.py`: restore hardware default source names
-  using `amp.hardware` model tables.
 
 Write examples construct `System(..., read_only=False)`.
 
