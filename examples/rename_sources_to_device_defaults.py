@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from _system_example import add_connection_args, discover_or_timeout, make_system, selected_hosts
+from _system_example import add_connection_args, discover_or_timeout, selected_hosts
 
 from amp.byte_utils import HexBytes
 from amp.codec import Op, SourceNameOp
@@ -93,7 +93,7 @@ async def async_main() -> None:
     args = parser.parse_args()
 
     selected_device_ids = set(args.device_ids or ())
-    with make_system(selected_hosts(args), read_only=False, trace=args.trace) as system:
+    with System(selected_hosts(args), read_only=False, trace=args.trace) as system:
         await discover_or_timeout(system, args)
         for device in system.state.devices.values():
             if selected_device_ids and device.id not in selected_device_ids:

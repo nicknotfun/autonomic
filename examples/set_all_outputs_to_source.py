@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from _system_example import add_connection_args, discover_or_timeout, make_system, selected_hosts
+from _system_example import add_connection_args, discover_or_timeout, selected_hosts
 
 from amp.system import InputSelector, System
 
@@ -30,7 +30,7 @@ async def async_main() -> None:
     )
     args = parser.parse_args()
 
-    with make_system(selected_hosts(args), read_only=False, trace=args.trace) as system:
+    with System(selected_hosts(args), read_only=False, trace=args.trace) as system:
         await discover_or_timeout(system, args)
         source = select_input(system, args.source_name)
         system.all_outputs().set_input(source)

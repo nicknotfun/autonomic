@@ -72,13 +72,11 @@ Build a system snapshot:
 ```python
 import asyncio
 
-from amp.codec import connect
 from amp.system import System
 
 
 async def main() -> None:
-    transport = connect("10.1.0.200")
-    with System(transport) as system:
+    with System(("10.1.0.200", "10.1.0.201")) as system:
         await system.discover(target_devices=2)
         system.dump()
 
@@ -86,8 +84,10 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`System` starts transport event tasks during construction, so create it inside an
-active asyncio event loop.
+`System` accepts a host string, an iterable of host strings, an existing
+transport, or an iterable of transports. It starts transport event tasks during
+construction, so create it inside an active asyncio event loop. Pass
+`read_only=False` when constructing a write-enabled system.
 
 ## System State
 
@@ -204,7 +204,7 @@ Example scripts live under [examples/](examples):
 - `rename_sources_to_device_defaults.py`: restore hardware default source names
   using `amp.hardware` model tables.
 
-Write examples open transports with `read_only=False`.
+Write examples construct `System(..., read_only=False)`.
 
 ## Layout
 

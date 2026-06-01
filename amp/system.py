@@ -3,7 +3,7 @@ import json
 import logging
 from collections.abc import Callable, Hashable, Iterable
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, TypeAlias, TypeGuard, TypeVar, cast
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
@@ -329,17 +329,72 @@ class SystemState(VersionTrackerMixin):
             self.remote_inputs[remote_input_id].merge(other_remote_input)
 
 
+TransportArgument: TypeAlias = Transport[Op] | Iterable[Transport[Op]] | str | Iterable[str]
+
+
+def _is_transport(value: object) -> TypeGuard[Transport[Op]]:
+    return hasattr(value, "send") and hasattr(value, "recv") and hasattr(value, "shutdown")
+
+
+def _normalize_transport_argument(
+    transport_arg: TransportArgument,
+    *,
+    port: int,
+    reconnection_wait_secs: float,
+    connection_timeout_secs: float,
+    trace: bool,
+    read_only: bool,
+) -> tuple[Transport[Op], ...]:
+    if isinstance(transport_arg, str):
+        return (
+            codec.connect(
+                transport_arg,
+                port=port,
+                reconnection_wait_secs=reconnection_wait_secs,
+                connection_timeout_secs=connection_timeout_secs,
+                trace=trace,
+                read_only=read_only,
+            ),
+        )
+    elif _is_transport(transport_arg):
+        return (transport_arg,)
+    else:
+        transports: list[Transport[Op]] = []
+        for item in cast(Iterable[TransportArgument], transport_arg):
+            transports.extend(
+                _normalize_transport_argument(
+                    item,
+                    port=port,
+                    reconnection_wait_secs=reconnection_wait_secs,
+                    connection_timeout_secs=connection_timeout_secs,
+                    trace=trace,
+                    read_only=read_only,
+                )
+            )
+        return tuple(transports)
+
+
 class System(VersionTrackerMixin):
     def __init__(
         self,
-        transport: Transport[Op] | Iterable[Transport[Op]],
+        transport: TransportArgument,
         state: SystemState | None = None,
+        *,
+        port: int = 17037,
+        reconnection_wait_secs: float = 5.0,
+        connection_timeout_secs: float = 10.0,
+        trace: bool = False,
+        read_only: bool = True,
     ) -> None:
         super().__init__()
-        if hasattr(transport, "send"):
-            self.transports: tuple[Transport[Op], ...] = (cast(Transport[Op], transport),)
-        else:
-            self.transports = tuple(transport)
+        self.transports = _normalize_transport_argument(
+            transport,
+            port=port,
+            reconnection_wait_secs=reconnection_wait_secs,
+            connection_timeout_secs=connection_timeout_secs,
+            trace=trace,
+            read_only=read_only,
+        )
         if not self.transports:
             raise ValueError("System requires at least one transport")
         self.transport = self.transports[0]

@@ -5,7 +5,9 @@ import asyncio
 import json
 from typing import Any
 
-from _system_example import add_connection_args, discover_or_timeout, make_system, selected_hosts
+from _system_example import add_connection_args, discover_or_timeout, selected_hosts
+
+from amp.system import System
 
 
 async def async_main() -> None:
@@ -16,7 +18,7 @@ async def async_main() -> None:
     args = parser.parse_args()
 
     hosts = selected_hosts(args)
-    with make_system(hosts, read_only=True, trace=args.trace) as system:
+    with System(hosts, trace=args.trace) as system:
         await discover_or_timeout(system, args)
         snapshot: dict[str, Any] = {"hosts": list(hosts), **system.state.to_json()}
 

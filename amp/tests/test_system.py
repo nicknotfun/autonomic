@@ -20,6 +20,7 @@ from amp.codec import (
     MaxVolumeOp,
     MuteOp,
     Op,
+    OpEncoder,
     OutputOp,
     OutputNameOp,
     OutputNameRefreshOp,
@@ -262,6 +263,43 @@ def test_remote_input_tracks_missing_read_only_update_ops_and_readbacks() -> Non
     assert remote_input.source_index is None
     assert remote_input.name is None
     assert remote_input.needed_update_ops() == []
+
+
+def test_system_accepts_host_strings_and_builds_transports() -> None:
+    async def scenario() -> None:
+        single = System(
+            "127.0.0.1",
+            port=12345,
+            reconnection_wait_secs=0.1,
+            connection_timeout_secs=0.2,
+            trace=True,
+            read_only=False,
+        )
+        try:
+            assert len(single.transports) == 1
+            assert single.transport.host == "127.0.0.1"
+            assert single.transport.port == 12345
+            assert single.transport.reconnection_wait_secs == 0.1
+            assert single.transport.connection_timeout_secs == 0.2
+            assert single.transport.trace is True
+            assert isinstance(single.transport.encoder, OpEncoder)
+            assert single.transport.encoder.read_only is False
+        finally:
+            single.shutdown()
+
+        multiple = System(("127.0.0.1", "127.0.0.2"), port=12346)
+        try:
+            assert [transport.host for transport in multiple.transports] == [
+                "127.0.0.1",
+                "127.0.0.2",
+            ]
+            assert [transport.port for transport in multiple.transports] == [12346, 12346]
+        finally:
+            multiple.shutdown()
+
+        await asyncio.sleep(0)
+
+    asyncio.run(scenario())
 
 
 def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None:

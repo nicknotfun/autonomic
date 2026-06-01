@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections.abc import Sequence
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from amp.codec import Op, connect
 from amp.system import System
-from amp.transport import Transport
 
 
 DEFAULT_HOST = "10.1.0.200"
@@ -48,20 +45,6 @@ def add_connection_args(parser: argparse.ArgumentParser, *, write: bool = False)
 def selected_hosts(args: argparse.Namespace) -> tuple[str, ...]:
     hosts = tuple(args.hosts or ())
     return hosts or (DEFAULT_HOST,)
-
-
-def make_system(
-    hosts: Sequence[str],
-    *,
-    read_only: bool,
-    trace: bool = False,
-) -> System:
-    transports: tuple[Transport[Op], ...] = tuple(
-        connect(host, trace=trace, read_only=read_only) for host in hosts
-    )
-    if len(transports) == 1:
-        return System(transports[0])
-    return System(transports)
 
 
 async def discover_or_timeout(system: System, args: argparse.Namespace) -> None:
