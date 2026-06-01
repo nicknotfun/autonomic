@@ -16,88 +16,6 @@ UNASSIGNED_OUTPUT = 0xFC
 DISABLED_OUTPUT = 0xFB
 ALL_USED_OUTPUTS = 0xFA
 
-PARAMETER_COMMENTS: dict[str, str] = {
-    "action": "Preset alarm action byte; not obsolete except when carried by an obsolete command.",
-    "amount": "Optional volume step encoded on the same 00h-A0h scale as volume; not obsolete.",
-    "assigned_output": "Zone/output byte assigned to a keypad; response parameter, not obsolete.",
-    "backing_device_guid": "GUID of the source-owning device in Autonomic/Windows wire order; not obsolete.",
-    "balance": "Signed balance value in the manufacturer range ECh-14h (-20..20); not obsolete.",
-    "bass": "Signed bass value in the manufacturer range F4h-0Ch (-12..12); not obsolete.",
-    "command": "Command-specific subcommand byte; not obsolete except when carried by an obsolete command.",
-    "day": "Day-of-month byte in a time response; not obsolete.",
-    "delay": "Audio delay byte; not obsolete.",
-    "detail": "Observed trailing command-specific status bytes preserved losslessly; not obsolete unless noted on the command.",
-    "device_id": "Two-byte amplifier/unit ID; not obsolete except when carried by an obsolete command.",
-    "digital_output": "Digital output selector for source mapping; not obsolete.",
-    "entry_index": "List entry index for media-server or account-like tables; obsolete only on UserAccountsCommand.",
-    "event": "Clipping event byte; notification parameter, not obsolete.",
-    "favorite_index": "Media favourite list index; not obsolete.",
-    "firmware": "Firmware version byte returned by device information; response parameter, not obsolete.",
-    "flags": "Command-specific bit flags; not obsolete unless noted on the command.",
-    "format_or_zero": "PCM stream format in the first packet, otherwise 00h; obsolete with PCM Stream.",
-    "gain": "Signed zone-gain value in the manufacturer range F4h-0Ch (-12 dB..+12 dB); not obsolete.",
-    "gains": "Per-source gain values encoded on the 00h-12h scale; not obsolete.",
-    "guid": "Device GUID in Autonomic/Windows wire order for network settings or RFC order for observed host identity; not obsolete.",
-    "hidden_name": "Manufacturer length-prefixed internal source name observed in source-name rows; not obsolete.",
-    "hour": "Hour byte in a time response; not obsolete.",
-    "info": "Clipping notification detail byte; not obsolete.",
-    "instruction": "Settings-management instruction byte; not obsolete.",
-    "is_loud": "Amplifier-special-features loudness bit; not obsolete, though some adjacent feature bits are obsolete in the PDF.",
-    "is_muted": "Mute state byte using manufacturer mute polarity; not obsolete.",
-    "is_on": "Power state byte using manufacturer power polarity; not obsolete.",
-    "is_selected": "Party-mode selection flag; obsolete with PartyModeSelectionCommand.",
-    "key": "Keypad key/repeat byte; obsolete with EmulateKeyPressOnKeypadCommand.",
-    "key_code": "KPE key code; not obsolete.",
-    "keypad_id": "Four-byte keypad ID used by keypad zone assignment; not obsolete.",
-    "linked_output": "Zone linked to this command's zone; obsolete with LinkZonePairCommand.",
-    "mac": "Six-byte MAC address; response parameter, not obsolete.",
-    "max_packet_size": "Maximum PCM packet size; obsolete with RequestPcmCapabilitiesCommandResponse.",
-    "max_volume": "Maximum-volume byte encoded on the 00h-A0h scale; not obsolete.",
-    "members": "Linked member zone bytes for Link zones; not obsolete.",
-    "message": "UTF-8 report-message body; not obsolete.",
-    "message_type": "Report-message type byte; not obsolete.",
-    "minute": "Minute byte in a time response; not obsolete.",
-    "mode": "Command-specific mode byte for source up/down or time requests; not obsolete.",
-    "model_id": "Model identifier byte returned by device information; response parameter, not obsolete.",
-    "model_info": "Device-specific model/manufacture bytes in extended information; response parameter, not obsolete.",
-    "month": "Month byte in a time response; not obsolete.",
-    "name": "UTF-8 display name; not obsolete unless carried by an obsolete command.",
-    "occupancy": "Keypad port occupancy byte; response parameter, not obsolete.",
-    "operation": "Dynamic-zone-linking operation byte; not obsolete.",
-    "option": "Miscellaneous-device-settings option byte; not obsolete.",
-    "options": "Command-specific options/flags bytes; obsolete only when carried by an obsolete command.",
-    "output": "Manufacturer zone/output selector byte; not obsolete.",
-    "parameter": "Status parameter selector byte; not obsolete.",
-    "payload": "Opaque command-specific bytes retained losslessly; obsolete only when carried by an obsolete command.",
-    "position": "Metadata position or PCM stream position depending on command; obsolete only for PCM stream fields.",
-    "position_or_length": "PCM stream length in the first packet, otherwise stream position; obsolete with PCM Stream.",
-    "power_on_volume": "Power-on volume byte encoded on the 00h-A0h scale; not obsolete.",
-    "preamp_volume_mode": "Preamp volume-mode signed byte; not obsolete.",
-    "prefix": "Extended device-information response prefix bytes; not obsolete.",
-    "preset": "Preset selector/index byte; obsolete only on ObsoletePresetSelectionStatusCommand.",
-    "purpose": "PCM purpose byte; obsolete with PCM capability/stream commands.",
-    "request": "Optional Send All Parameters request byte; not obsolete, but the command is manufacturer-deprecated.",
-    "second": "Second byte in a time response; not obsolete.",
-    "service_id": "Extended media/service identifier byte; not obsolete.",
-    "setting_id": "Network settings selector byte; not obsolete.",
-    "slot_id": "Arbitrary-data or distributed-source slot ID; not obsolete.",
-    "source": "Source selector byte; not obsolete.",
-    "source_delays": "Per-source audio-delay table bytes; response parameter, not obsolete.",
-    "source_index": "Backing source index for a distributed source definition; not obsolete.",
-    "source_selector": "Logical source selector byte; not obsolete.",
-    "status": "Command-specific status byte; obsolete only when carried by an obsolete command.",
-    "stream_format": "PCM stream format byte; obsolete with PCM Stream.",
-    "supported_formats": "PCM supported-format bytes; obsolete with RequestPcmCapabilitiesCommandResponse.",
-    "system_id": "Amplifier stack/system assignment byte; response parameter, not obsolete.",
-    "treble": "Signed treble value in the manufacturer range F4h-0Ch (-12..12); not obsolete.",
-    "value": "UTF-8 metadata value; not obsolete.",
-    "version": "Protocol version byte; response parameter, not obsolete.",
-    "volume": "Volume byte encoded on the 00h-A0h scale; not obsolete.",
-    "weekday": "Weekday byte in a time response; not obsolete.",
-    "year": "Year byte in a time response; not obsolete.",
-    "zones": "Repeated zone/output bytes; not obsolete.",
-}
-
 
 class Command:
     COMMAND_STATUS: ClassVar[str] = "active"
@@ -247,9 +165,7 @@ class ReportErrorCommand(OutputCommand):
 @dataclass(kw_only=True, frozen=True)
 class EmulateKeyPressOnKeypadCommand(OutputCommand):
     COMMAND_STATUS: ClassVar[str] = "obsolete"
-    COMMAND_NOTE: ClassVar[str] = (
-        "Manufacturer marks Emulate key press on Keypad (0B) obsolete."
-    )
+    COMMAND_NOTE: ClassVar[str] = "Manufacturer marks Emulate key press on Keypad (0B) obsolete."
     PATTERN: ClassVar[str] = "0B{output:N}{key:N?}!"
 
     key: int | None = None
@@ -767,9 +683,7 @@ class IrRoutingAssignmentsCommand(OutputCommand):
 @dataclass(kw_only=True, frozen=True)
 class PartyModeSelectionCommand(OutputCommand):
     COMMAND_STATUS: ClassVar[str] = "obsolete"
-    COMMAND_NOTE: ClassVar[str] = (
-        "Manufacturer marks Party mode select/deselect (36) obsolete."
-    )
+    COMMAND_NOTE: ClassVar[str] = "Manufacturer marks Party mode select/deselect (36) obsolete."
     PATTERN: ClassVar[str] = "36{output:N}{is_selected:bool}!"
 
     is_selected: bool
@@ -805,9 +719,7 @@ class RequestExtendedDeviceInformationCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestExtendedDeviceInformationCommandResponse(DeviceIdCommand):
-    PATTERN: ClassVar[str] = (
-        "B9FF{prefix:4X}{device_id:4X}{model_info:18X}{mac:12X}{detail:hex}!"
-    )
+    PATTERN: ClassVar[str] = "B9FF{prefix:4X}{device_id:4X}{model_info:18X}{mac:12X}{detail:hex}!"
 
     prefix: HexBytes
     model_info: HexBytes
@@ -1137,7 +1049,9 @@ class DistributedSourceDefinitionRequestCommand(DistributedSourceDefinitionSlotC
 
 @dataclass(kw_only=True, frozen=True)
 class DistributedSourceDefinitionCommand(DistributedSourceDefinitionSlotCommand):
-    PATTERN: ClassVar[str] = "4F{output:N}{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!"
+    PATTERN: ClassVar[str] = (
+        "4F{output:N}{slot_id:N}{backing_device_guid:guid}{source_index:N}{name:utf8}!"
+    )
 
     slot_id: int
     backing_device_guid: UUID
