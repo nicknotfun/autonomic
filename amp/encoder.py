@@ -463,7 +463,7 @@ class PatternEncoder(Generic[T]):
 
 
 class SubclassEncoder(Generic[T]):
-    """An encoder that encodes messages of type T by finding a subclass of Op with a matching pattern."""
+    """An encoder that encodes messages of type T by finding a subclass of Command with a matching pattern."""
 
     def __init__(self, target_type: type[T]) -> None:
         self.target_type = target_type

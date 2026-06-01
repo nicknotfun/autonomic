@@ -8,7 +8,7 @@ transport, and system-state layers against live devices and writes a JSON
 artifact that is useful for answering three practical questions:
 
 1. Which query/read paths did the devices answer?
-2. Which raw rows did `amp.codec.OpEncoder` fail to deserialize?
+2. Which raw rows did `amp.codec.CommandEncoder` fail to deserialize?
 3. Did no-op write helpers preserve the observed output state?
 
 The default mode is read-only. Use `--write-noops` to include the write phase
@@ -36,7 +36,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from amp.byte_utils import HexBytes
 import amp.codec as codec
-from amp.codec import Op, OpEncoder
+from amp.codec import Command, CommandEncoder
 from amp.system import InputSelector, System
 from amp.toggle_bool import ToggleBool
 
@@ -65,19 +65,19 @@ def json_default(value: Any) -> Any:
     return str(value)
 
 
-def op_fields(op: Op) -> dict[str, Any]:
+def op_fields(op: Command) -> dict[str, Any]:
     """Return dataclass fields for an op with JSON-friendly scalar values."""
 
     try:
         data = asdict(op)  # type: ignore[arg-type]
     except TypeError:
-        # This is defensive; current Op implementations are dataclasses when
+        # This is defensive; current Command implementations are dataclasses when
         # they have fields, but keeping this tolerant helps future experiments.
         data = {}
     return {key: json_default(value) for key, value in data.items()}
 
 
-def op_summary(op: Op | None) -> dict[str, Any] | None:
+def op_summary(op: Command | None) -> dict[str, Any] | None:
     """Build the compact decoded-op record stored next to each raw row."""
 
     if op is None:
@@ -126,7 +126,7 @@ class RawSocketProbe:
     `amp.transport.Transport` is the right production path, but it intentionally
     drops rows that fail decoding. For codec coverage work that is the wrong
     tradeoff: we need to keep the raw row so the missing pattern can be fixed.
-    This class therefore uses the same `OpEncoder` but owns the socket loop.
+    This class therefore uses the same `CommandEncoder` but owns the socket loop.
     """
 
     def __init__(self, host: str, *, port: int, send_gap: float, idle_wait: float) -> None:
@@ -138,16 +138,16 @@ class RawSocketProbe:
         # read_only=False is used only so the encoder can serialize write-shaped
         # ops during optional no-op write tests. The script controls whether
         # those writes are sent with `--write-noops`.
-        self.encoder = OpEncoder(read_only=False)
+        self.encoder = CommandEncoder(read_only=False)
 
         self.probe = HostProbe(host=host)
-        self._ops: list[Op] = []
+        self._ops: list[Command] = []
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._read_task: asyncio.Task[None] | None = None
 
     @property
-    def ops(self) -> list[Op]:
+    def ops(self) -> list[Command]:
         return self._ops
 
     async def __aenter__(self) -> "RawSocketProbe":
@@ -220,7 +220,7 @@ class RawSocketProbe:
 
         await asyncio.sleep(self.idle_wait if wait is None else wait)
 
-    async def send_ops(self, phase: str, ops: Iterable[Op]) -> None:
+    async def send_ops(self, phase: str, ops: Iterable[Command]) -> None:
         """Encode and send a phase of rows, retaining every outbound row."""
 
         assert self._writer is not None
@@ -244,12 +244,12 @@ class RawSocketProbe:
         await self.drain_idle()
 
 
-def unique_ops(ops: Iterable[Op]) -> tuple[Op, ...]:
+def unique_ops(ops: Iterable[Command]) -> tuple[Command, ...]:
     """Deduplicate ops by encoded row while preserving the original order."""
 
     seen: set[str] = set()
-    out: list[Op] = []
-    encoder = OpEncoder(read_only=False)
+    out: list[Command] = []
+    encoder = CommandEncoder(read_only=False)
     for op in ops:
         raw = encoder.encode(op)
         if raw is None:
@@ -262,27 +262,27 @@ def unique_ops(ops: Iterable[Op]) -> tuple[Op, ...]:
     return tuple(out)
 
 
-def discovered_device_ids(ops: Iterable[Op]) -> tuple[HexBytes, ...]:
+def discovered_device_ids(ops: Iterable[Command]) -> tuple[HexBytes, ...]:
     """Return known plus live-discovered device ids."""
 
     ids = set(KNOWN_DEVICE_IDS)
     for op in ops:
-        if isinstance(op, codec.DeviceIdOp):
+        if isinstance(op, codec.DeviceIdCommand):
             ids.add(op.device_id)
     return tuple(sorted(ids, key=str))
 
 
-def discovered_outputs(ops: Iterable[Op]) -> tuple[int, ...]:
+def discovered_outputs(ops: Iterable[Command]) -> tuple[int, ...]:
     """Return known plus live-discovered output ids."""
 
     outputs = set(KNOWN_OUTPUTS)
     for op in ops:
-        if isinstance(op, (codec.DeviceInfoOp, codec.ThisDeviceIdOp)):
+        if isinstance(op, (codec.RequestDeviceInformationCommandResponse, codec.RequestZoneAssignmentsCommandResponse)):
             outputs.update(op.zones)
     return tuple(sorted(outputs))
 
 
-def discovered_selectors(ops: Iterable[Op]) -> tuple[int, ...]:
+def discovered_selectors(ops: Iterable[Command]) -> tuple[int, ...]:
     """Return known plus live-discovered source selectors.
 
     The seed includes M6250 local/remote selectors and MA6 local/casting
@@ -319,13 +319,13 @@ def discovered_selectors(ops: Iterable[Op]) -> tuple[int, ...]:
         0x52,
     }
     for op in ops:
-        if isinstance(op, codec.SourceNameOp):
+        if isinstance(op, codec.SourceNameOptionsCommand):
             selectors.add(op.source_selector)
-        elif isinstance(op, codec.SourceSelectOp) and op.source is not None:
+        elif isinstance(op, codec.SourceSelectionCommand) and op.source is not None:
             # Status rows can set bit 7. System state clears it before comparing
             # selectors, so the probe summary does the same.
             selectors.add(op.source & 0x7F)
-        elif isinstance(op, codec.InputGainOp) and op.source_selector is not None:
+        elif isinstance(op, codec.SourceGainCommand) and op.source_selector is not None:
             selectors.add(op.source_selector)
     return tuple(sorted(selectors))
 
@@ -346,12 +346,12 @@ def rows_by_type(events: Iterable[RawEvent], op_type: str) -> list[str]:
     return sorted({event.raw for event in events if event.op_type == op_type})
 
 
-def first_by_output(ops: Iterable[Op], cls: type[Op]) -> dict[int, Op]:
+def first_by_output(ops: Iterable[Command], cls: type[Command]) -> dict[int, Command]:
     """Pick the latest observed op of a given class for each real output."""
 
-    values: dict[int, Op] = {}
+    values: dict[int, Command] = {}
     for op in ops:
-        if isinstance(op, cls) and isinstance(op, codec.OutputOp):
+        if isinstance(op, cls) and isinstance(op, codec.OutputCommand):
             if op.output != codec.ALL_OUTPUTS:
                 values[op.output] = op
     return values
@@ -371,17 +371,17 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         await probe.send_ops(
             "discovery",
             [
-                codec.DeviceIdDiscoveryOp(),
-                codec.DeviceInfoDiscoveryOp(),
-                codec.DeviceHostInfoDiscoveryOp(),
-                codec.ExtendedDeviceInfoDiscoveryOp(),
-                codec.RemoteSourceDiscoveryOp(),
-                codec.PowerOp(),
-                codec.MuteOp(),
-                codec.SourceSelectOp(),
-                codec.VolumeOp(),
-                codec.MaxVolumeOp(),
-                codec.OutputNameRefreshOp(),
+                codec.RequestZoneAssignmentsCommand(),
+                codec.RequestDeviceInformationCommand(),
+                codec.UndocumentedHostIdentityCommand(),
+                codec.RequestExtendedDeviceInformationCommand(),
+                codec.DistributedSourceDefinitionRequestCommand(),
+                codec.StandbyPowerCommand(),
+                codec.MuteCommand(),
+                codec.SourceSelectionCommand(),
+                codec.VolumeCommand(),
+                codec.MaximumVolumeCommand(),
+                codec.ZoneNameRequestCommand(),
             ],
         )
 
@@ -396,11 +396,11 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                 op
                 for device_id in device_ids
                 for op in (
-                    codec.ExtendedDeviceInfoDiscoveryOp(device_id=device_id),
-                    codec.DeviceGuidQueryOp(device_id=device_id),
-                    codec.DeviceStateOp(device_id=device_id),
-                    codec.DeviceLinkQueryOp(device_id=device_id),
-                    codec.DeviceLinkOp(device_id=device_id),
+                    codec.RequestExtendedDeviceInformationCommand(device_id=device_id),
+                    codec.NetworkSettingsDeviceGuidRequestCommand(device_id=device_id),
+                    codec.KeypadPortZoneMappingCommand(device_id=device_id),
+                    codec.KeypadPortOccupancyCommand(device_id=device_id),
+                    codec.KeypadPortOccupancyCommandResponse(device_id=device_id),
                 )
             ),
         )
@@ -416,22 +416,22 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                 op
                 for output in outputs
                 for op in (
-                    codec.PowerOp(output=output),
-                    codec.MuteOp(output=output),
-                    codec.SourceSelectOp(output=output),
-                    codec.VolumeOp(output=output),
-                    codec.MaxVolumeOp(output=output),
-                    codec.BassOp(output=output),
-                    codec.TrebleOp(output=output),
-                    codec.BalanceOp(output=output),
-                    codec.LoudnessOp(output=output),
-                    codec.OutputParametersRefreshOp(output=output),
-                    codec.DelayOp(output=output),
-                    codec.ZoneGroupOp(output=output, flags=None),
-                    codec.InputGainOp(output=output, source_selector=0xFF),
-                    codec.OutputGainOp(output=output),
-                    codec.OutputNameRefreshOp(output=output),
-                    codec.SourceNameDiscoveryOp(output=output),
+                    codec.StandbyPowerCommand(output=output),
+                    codec.MuteCommand(output=output),
+                    codec.SourceSelectionCommand(output=output),
+                    codec.VolumeCommand(output=output),
+                    codec.MaximumVolumeCommand(output=output),
+                    codec.BassCommand(output=output),
+                    codec.TrebleCommand(output=output),
+                    codec.BalanceCommand(output=output),
+                    codec.AmplifierSpecialFeaturesCommand(output=output),
+                    codec.SendAllParametersCommand(output=output),
+                    codec.AudioDelayCommand(output=output),
+                    codec.LinkZonesCommand(output=output, flags=None),
+                    codec.SourceGainCommand(output=output, source_selector=0xFF),
+                    codec.ZoneGainCommand(output=output),
+                    codec.ZoneNameRequestCommand(output=output),
+                    codec.SourceNameOptionsRequestCommand(output=output),
                 )
             ),
         )
@@ -443,7 +443,7 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         await probe.send_ops(
             "source_name_single_reads",
             unique_ops(
-                codec.SourceNameOp(output=output, source_selector=selector)
+                codec.SourceNameOptionsCommand(output=output, source_selector=selector)
                 for output in outputs
                 for selector in selectors
             ),
@@ -456,14 +456,14 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
             {
                 op.source & 0x7F
                 for op in probe.ops
-                if isinstance(op, codec.SourceSelectOp) and op.source is not None
+                if isinstance(op, codec.SourceSelectionCommand) and op.source is not None
             }
         )
         metadata_selectors = current_selectors or list(selectors[:4])
         await probe.send_ops(
             "source_metadata_reads",
             unique_ops(
-                codec.SourceMetadataQueryOp(
+                codec.SourceSpecificMetadataRequestCommand(
                     output=codec.ALL_OUTPUTS,
                     source_selector=selector,
                     position=position,
@@ -480,10 +480,10 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
             "remote_and_preset_reads",
             unique_ops(
                 [
-                    codec.RemoteSourceDiscoveryOp(),
-                    *[codec.RemoteSourceDiscoveryOp(slot_id=slot) for slot in REMOTE_SLOTS],
-                    *[codec.PresetGroupOp(slot_id=slot) for slot in range(16)],
-                    *[codec.PresetGroupOp(slot_id=0x8000 + slot) for slot in range(16)],
+                    codec.DistributedSourceDefinitionRequestCommand(),
+                    *[codec.DistributedSourceDefinitionRequestCommand(slot_id=slot) for slot in REMOTE_SLOTS],
+                    *[codec.ArbitraryDataStorageCommand(slot_id=slot) for slot in range(16)],
+                    *[codec.ArbitraryDataStorageCommand(slot_id=0x8000 + slot) for slot in range(16)],
                 ]
             ),
         )
@@ -493,40 +493,40 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         # Source selectors are normalized with bit 7 cleared, matching System
         # state. This phase deliberately avoids renames and configuration writes.
         current_ops = list(probe.ops)
-        no_op_writes: list[Op] = []
-        for output, op in first_by_output(current_ops, codec.PowerOp).items():
-            if isinstance(op, codec.PowerOp) and op.is_on is not None:
-                no_op_writes.append(codec.PowerOp(output=output, is_on=op.is_on))
-        for output, op in first_by_output(current_ops, codec.MuteOp).items():
-            if isinstance(op, codec.MuteOp) and op.is_muted is not None:
-                no_op_writes.append(codec.MuteOp(output=output, is_muted=op.is_muted))
-        for output, op in first_by_output(current_ops, codec.SourceSelectOp).items():
-            if isinstance(op, codec.SourceSelectOp) and op.source is not None:
-                no_op_writes.append(codec.SourceSelectOp(output=output, source=op.source & 0x7F))
-        for output, op in first_by_output(current_ops, codec.VolumeOp).items():
-            if isinstance(op, codec.VolumeOp) and op.volume is not None:
-                no_op_writes.append(codec.VolumeOp(output=output, volume=op.volume))
-        for output, op in first_by_output(current_ops, codec.MaxVolumeOp).items():
-            if isinstance(op, codec.MaxVolumeOp) and op.max_volume is not None:
-                no_op_writes.append(codec.MaxVolumeOp(output=output, max_volume=op.max_volume))
-        for output, op in first_by_output(current_ops, codec.BassOp).items():
-            if isinstance(op, codec.BassOp) and op.bass is not None:
-                no_op_writes.append(codec.BassOp(output=output, bass=op.bass))
-        for output, op in first_by_output(current_ops, codec.TrebleOp).items():
-            if isinstance(op, codec.TrebleOp) and op.treble is not None:
-                no_op_writes.append(codec.TrebleOp(output=output, treble=op.treble))
-        for output, op in first_by_output(current_ops, codec.BalanceOp).items():
-            if isinstance(op, codec.BalanceOp) and op.balance is not None:
-                no_op_writes.append(codec.BalanceOp(output=output, balance=op.balance))
-        for output, op in first_by_output(current_ops, codec.LoudnessOp).items():
-            if isinstance(op, codec.LoudnessOp) and op.is_loud is not None:
-                no_op_writes.append(codec.LoudnessOp(output=output, is_loud=op.is_loud))
-        for output, op in first_by_output(current_ops, codec.DelayOp).items():
-            if isinstance(op, codec.DelayOp) and op.delay is not None:
-                no_op_writes.append(codec.DelayOp(output=output, delay=op.delay))
-        for output, op in first_by_output(current_ops, codec.OutputGainOp).items():
-            if isinstance(op, codec.OutputGainOp) and op.gain is not None:
-                no_op_writes.append(codec.OutputGainOp(output=output, gain=op.gain))
+        no_op_writes: list[Command] = []
+        for output, op in first_by_output(current_ops, codec.StandbyPowerCommand).items():
+            if isinstance(op, codec.StandbyPowerCommand) and op.is_on is not None:
+                no_op_writes.append(codec.StandbyPowerCommand(output=output, is_on=op.is_on))
+        for output, op in first_by_output(current_ops, codec.MuteCommand).items():
+            if isinstance(op, codec.MuteCommand) and op.is_muted is not None:
+                no_op_writes.append(codec.MuteCommand(output=output, is_muted=op.is_muted))
+        for output, op in first_by_output(current_ops, codec.SourceSelectionCommand).items():
+            if isinstance(op, codec.SourceSelectionCommand) and op.source is not None:
+                no_op_writes.append(codec.SourceSelectionCommand(output=output, source=op.source & 0x7F))
+        for output, op in first_by_output(current_ops, codec.VolumeCommand).items():
+            if isinstance(op, codec.VolumeCommand) and op.volume is not None:
+                no_op_writes.append(codec.VolumeCommand(output=output, volume=op.volume))
+        for output, op in first_by_output(current_ops, codec.MaximumVolumeCommand).items():
+            if isinstance(op, codec.MaximumVolumeCommand) and op.max_volume is not None:
+                no_op_writes.append(codec.MaximumVolumeCommand(output=output, max_volume=op.max_volume))
+        for output, op in first_by_output(current_ops, codec.BassCommand).items():
+            if isinstance(op, codec.BassCommand) and op.bass is not None:
+                no_op_writes.append(codec.BassCommand(output=output, bass=op.bass))
+        for output, op in first_by_output(current_ops, codec.TrebleCommand).items():
+            if isinstance(op, codec.TrebleCommand) and op.treble is not None:
+                no_op_writes.append(codec.TrebleCommand(output=output, treble=op.treble))
+        for output, op in first_by_output(current_ops, codec.BalanceCommand).items():
+            if isinstance(op, codec.BalanceCommand) and op.balance is not None:
+                no_op_writes.append(codec.BalanceCommand(output=output, balance=op.balance))
+        for output, op in first_by_output(current_ops, codec.AmplifierSpecialFeaturesCommand).items():
+            if isinstance(op, codec.AmplifierSpecialFeaturesCommand) and op.is_loud is not None:
+                no_op_writes.append(codec.AmplifierSpecialFeaturesCommand(output=output, is_loud=op.is_loud))
+        for output, op in first_by_output(current_ops, codec.AudioDelayCommand).items():
+            if isinstance(op, codec.AudioDelayCommand) and op.delay is not None:
+                no_op_writes.append(codec.AudioDelayCommand(output=output, delay=op.delay))
+        for output, op in first_by_output(current_ops, codec.ZoneGainCommand).items():
+            if isinstance(op, codec.ZoneGainCommand) and op.gain is not None:
+                no_op_writes.append(codec.ZoneGainCommand(output=output, gain=op.gain))
 
         if args.write_noops:
             await probe.send_ops("no_op_setting_writes", unique_ops(no_op_writes))
@@ -536,17 +536,17 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                     op
                     for output in outputs
                     for op in (
-                        codec.PowerOp(output=output),
-                        codec.MuteOp(output=output),
-                        codec.SourceSelectOp(output=output),
-                        codec.VolumeOp(output=output),
-                        codec.MaxVolumeOp(output=output),
-                        codec.BassOp(output=output),
-                        codec.TrebleOp(output=output),
-                        codec.BalanceOp(output=output),
-                        codec.LoudnessOp(output=output),
-                        codec.DelayOp(output=output),
-                        codec.OutputGainOp(output=output),
+                        codec.StandbyPowerCommand(output=output),
+                        codec.MuteCommand(output=output),
+                        codec.SourceSelectionCommand(output=output),
+                        codec.VolumeCommand(output=output),
+                        codec.MaximumVolumeCommand(output=output),
+                        codec.BassCommand(output=output),
+                        codec.TrebleCommand(output=output),
+                        codec.BalanceCommand(output=output),
+                        codec.AmplifierSpecialFeaturesCommand(output=output),
+                        codec.AudioDelayCommand(output=output),
+                        codec.ZoneGainCommand(output=output),
                     )
                 ),
             )
@@ -566,14 +566,14 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         # These examples make the top-level summary useful without opening the
         # full artifact. The full row list is still stored under raw_details.
         "rows_by_interesting_type": {
-            "DeviceStateOp": rows_by_type(probe.probe.received, "DeviceStateOp"),
-            "DeviceLinkQueryOp": rows_by_type(probe.probe.received, "DeviceLinkQueryOp"),
-            "DeviceLinkOp": rows_by_type(probe.probe.received, "DeviceLinkOp"),
-            "PresetGroupOp": rows_by_type(probe.probe.received, "PresetGroupOp")[:20],
-            "SourceMetadataOp": rows_by_type(probe.probe.received, "SourceMetadataOp")[:20],
-            "UnknownOutputStatusOp": rows_by_type(probe.probe.received, "UnknownOutputStatusOp"),
-            "DiagnosticStatus1DOp": rows_by_type(probe.probe.received, "DiagnosticStatus1DOp"),
-            "DiagnosticStatus1EOp": rows_by_type(probe.probe.received, "DiagnosticStatus1EOp"),
+            "KeypadPortZoneMappingCommand": rows_by_type(probe.probe.received, "KeypadPortZoneMappingCommand"),
+            "KeypadPortOccupancyCommand": rows_by_type(probe.probe.received, "KeypadPortOccupancyCommand"),
+            "KeypadPortOccupancyCommandResponse": rows_by_type(probe.probe.received, "KeypadPortOccupancyCommandResponse"),
+            "ArbitraryDataStorageCommand": rows_by_type(probe.probe.received, "ArbitraryDataStorageCommand")[:20],
+            "SourceSpecificMetadataCommand": rows_by_type(probe.probe.received, "SourceSpecificMetadataCommand")[:20],
+            "PowerOnVolumeLevelCommand": rows_by_type(probe.probe.received, "PowerOnVolumeLevelCommand"),
+            "PreampVolumeModeCommand": rows_by_type(probe.probe.received, "PreampVolumeModeCommand"),
+            "PresetSelectionStatusCommand": rows_by_type(probe.probe.received, "PresetSelectionStatusCommand"),
         },
     }
     return probe.probe, host_summary
@@ -794,13 +794,13 @@ async def async_main() -> None:
         "system_discovery": system_discovery,
         "selector_noop_writes": selector_noops,
         "skipped_live_writes": [
-            "OutputNameOp and SourceNameOp rename writes (explicitly excluded)",
-            "DeviceGuidOp identity write (unsafe identity repair/write path)",
-            "RemoteSourceInfoOp and RemoteSourceDeleteOp remote-slot config writes",
-            "DeviceLinkQueryOp/DeviceLinkOp state-changing link writes",
-            "SourceMetadataOp writes",
-            "VolumeUpOp/VolumeDownOp transient relative volume commands",
-            "InputGainOp full-table writes",
+            "ZoneNameCommand and SourceNameOptionsCommand rename writes (explicitly excluded)",
+            "NetworkSettingsDeviceGuidCommand identity write (unsafe identity repair/write path)",
+            "DistributedSourceDefinitionCommand and DistributedSourceDefinitionUnusedCommand remote-slot config writes",
+            "KeypadPortOccupancyCommand/KeypadPortOccupancyCommandResponse state-changing link writes",
+            "SourceSpecificMetadataCommand writes",
+            "VolumeUpCommand/VolumeDownCommand transient relative volume commands",
+            "SourceGainCommand full-table writes",
         ],
     }
     Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True, default=json_default))

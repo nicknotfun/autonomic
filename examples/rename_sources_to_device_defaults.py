@@ -6,7 +6,7 @@ import asyncio
 from _system_example import add_connection_args, discover_or_timeout, selected_hosts
 
 from amp.byte_utils import HexBytes
-from amp.codec import Op, SourceNameOp
+from amp.codec import Command, SourceNameOptionsCommand
 from amp.hardware import HardwareModelInfo, SourceModelInfo, model_by_number
 from amp.system import DeviceState, System
 from amp.transport import Transport
@@ -45,15 +45,15 @@ def default_source_name_ops(
     model: HardwareModelInfo,
     *,
     include_unchanged: bool,
-) -> tuple[SourceNameOp, ...]:
+) -> tuple[SourceNameOptionsCommand, ...]:
     if not device.outputs:
         return ()
     representative_output = device.outputs[0]
     return tuple(
-        SourceNameOp(
+        SourceNameOptionsCommand(
             output=representative_output,
             source_selector=source.selector,
-            misc=DEFAULT_SOURCE_MISC,
+            options=DEFAULT_SOURCE_MISC,
             name=source.name,
         )
         for source in model.sources
@@ -66,7 +66,7 @@ def default_source_name_ops(
     )
 
 
-def device_transport(system: System, device: DeviceState) -> Transport[Op]:
+def device_transport(system: System, device: DeviceState) -> Transport[Command]:
     return system.transport_for_device(device) or system.transport
 
 

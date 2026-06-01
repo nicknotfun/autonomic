@@ -128,7 +128,7 @@ Visible deltas from local v698:
 
 Result: v699 is newer and should be retained as a distinct downloaded family
 if this repository wants a corpus of driver versions. It does not expose new
-plaintext protocol operations beyond what the current docs already describe.
+plaintext protocol commands beyond what the current docs already describe.
 
 ### v699 Download Hashes
 

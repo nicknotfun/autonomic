@@ -4,3 +4,5 @@ __pycache__/
 .venv
 *.egg-info/
 .vscode/settings.json
+Documentation.pdf
+documentation.pdf

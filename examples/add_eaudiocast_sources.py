@@ -8,12 +8,12 @@ from uuid import UUID
 from _system_example import add_connection_args, discover_or_timeout, selected_hosts
 
 from amp.byte_utils import HexBytes
-from amp.codec import RemoteSourceInfoOp
+from amp.codec import DistributedSourceDefinitionCommand
 from amp.system import System
 
 
 @dataclass(frozen=True)
-class RemoteSourceDefinition:
+class DistributedSourceDefinition:
     target_device_id: HexBytes
     slot_id: int
     backing_device_guid: UUID
@@ -21,14 +21,14 @@ class RemoteSourceDefinition:
     name: str
 
 
-def parse_definition(value: str) -> RemoteSourceDefinition:
+def parse_definition(value: str) -> DistributedSourceDefinition:
     try:
         device_id, slot_id, guid, source_index, name = value.split(":", 4)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
             "expected TARGET_DEVICE:SLOT:BACKING_GUID:SOURCE_INDEX:NAME"
         ) from exc
-    return RemoteSourceDefinition(
+    return DistributedSourceDefinition(
         target_device_id=HexBytes(device_id),
         slot_id=int(slot_id, 0),
         backing_device_guid=UUID(guid),
@@ -39,7 +39,7 @@ def parse_definition(value: str) -> RemoteSourceDefinition:
 
 async def async_main() -> None:
     parser = argparse.ArgumentParser(
-        description="Define one or more eAudioCast remote-source slots."
+        description="Define one or more eAudioCast distributed-source slots."
     )
     add_connection_args(parser, write=True)
     parser.add_argument(
@@ -47,21 +47,21 @@ async def async_main() -> None:
         nargs="+",
         type=parse_definition,
         metavar="TARGET:SLOT:GUID:SOURCE_INDEX:NAME",
-        help="Remote source definition, for example 6012:0:674e1900-f8a9-f6be-a465-3d0fbee12977:6:.200 OPT1",
+        help="Distributed Source Definition, for example 6012:0:674e1900-f8a9-f6be-a465-3d0fbee12977:6:.200 OPT1",
     )
     args = parser.parse_args()
 
     with System(selected_hosts(args), read_only=False, trace=args.trace) as system:
         await discover_or_timeout(system, args)
         for definition in args.definitions:
-            op = RemoteSourceInfoOp(
+            command = DistributedSourceDefinitionCommand(
                 slot_id=definition.slot_id,
                 backing_device_guid=definition.backing_device_guid,
                 source_index=definition.source_index,
                 name=definition.name,
             )
             transport = system.transport_for_device_id(definition.target_device_id) or system.transport
-            system.send_ops(op, transport=transport)
+            system.send_ops(command, transport=transport)
         await asyncio.sleep(args.settle)
 
 

@@ -7,32 +7,32 @@ from uuid import UUID
 from amp.byte_utils import HexBytes
 from amp.codec import (
     ALL_OUTPUTS,
-    DeviceGuidOp,
-    DeviceGuidQueryOp,
-    DeviceHostInfoDiscoveryOp,
-    DeviceHostInfoOp,
-    DeviceIdDiscoveryOp,
-    DeviceInfoDiscoveryOp,
-    DeviceInfoOp,
-    ExtendedDeviceInfoDiscoveryOp,
-    ExtendedDeviceInfoOp,
-    InputGainOp,
-    MaxVolumeOp,
-    MuteOp,
-    Op,
-    OpEncoder,
-    OutputOp,
-    OutputNameOp,
-    OutputNameRefreshOp,
-    PowerOp,
-    RemoteSourceDeleteOp,
-    RemoteSourceDiscoveryOp,
-    RemoteSourceInfoOp,
-    SourceNameDiscoveryOp,
-    SourceNameOp,
-    SourceSelectOp,
-    ThisDeviceIdOp,
-    VolumeOp,
+    NetworkSettingsDeviceGuidCommand,
+    NetworkSettingsDeviceGuidRequestCommand,
+    UndocumentedHostIdentityCommand,
+    UndocumentedHostIdentityCommandResponse,
+    RequestZoneAssignmentsCommand,
+    RequestDeviceInformationCommand,
+    RequestDeviceInformationCommandResponse,
+    RequestExtendedDeviceInformationCommand,
+    RequestExtendedDeviceInformationCommandResponse,
+    SourceGainCommand,
+    MaximumVolumeCommand,
+    MuteCommand,
+    Command,
+    CommandEncoder,
+    OutputCommand,
+    ZoneNameCommand,
+    ZoneNameRequestCommand,
+    StandbyPowerCommand,
+    DistributedSourceDefinitionUnusedCommand,
+    DistributedSourceDefinitionRequestCommand,
+    DistributedSourceDefinitionCommand,
+    SourceNameOptionsRequestCommand,
+    SourceNameOptionsCommand,
+    SourceSelectionCommand,
+    RequestZoneAssignmentsCommandResponse,
+    VolumeCommand,
 )
 from amp.system import (
     PHYSICAL_SOURCE_ID_BY_LOGICAL_SELECTOR,
@@ -54,21 +54,21 @@ GUID = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
 class FakeTransport:
     def __init__(self, host: str = "10.1.0.200") -> None:
         self.host = host
-        self.sent: list[tuple[Op, ...]] = []
-        self.events: asyncio.Queue[Op | ConnectionInterrupted | None] = asyncio.Queue()
+        self.sent: list[tuple[Command, ...]] = []
+        self.events: asyncio.Queue[Command | ConnectionInterrupted | None] = asyncio.Queue()
         self.shutdown_called = False
 
-    def send(self, *ops: Op) -> None:
+    def send(self, *ops: Command) -> None:
         self.sent.append(ops)
 
-    async def recv(self) -> AsyncGenerator[Op | ConnectionInterrupted, None]:
+    async def recv(self) -> AsyncGenerator[Command | ConnectionInterrupted, None]:
         while True:
             op = await self.events.get()
             if op is None:
                 break
             yield op
 
-    def push(self, op: Op | ConnectionInterrupted) -> None:
+    def push(self, op: Command | ConnectionInterrupted) -> None:
         self.events.put_nowait(op)
 
     def shutdown(self) -> None:
@@ -166,27 +166,27 @@ def test_device_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     needed = device.needed_update_ops()
 
     assert [type(op) for op in needed] == [
-        DeviceInfoDiscoveryOp,
-        DeviceGuidQueryOp,
-        ExtendedDeviceInfoDiscoveryOp,
+        RequestDeviceInformationCommand,
+        NetworkSettingsDeviceGuidRequestCommand,
+        RequestExtendedDeviceInformationCommand,
     ]
-    assert isinstance(needed[1], DeviceGuidQueryOp)
-    assert isinstance(needed[2], ExtendedDeviceInfoDiscoveryOp)
+    assert isinstance(needed[1], NetworkSettingsDeviceGuidRequestCommand)
+    assert isinstance(needed[2], RequestExtendedDeviceInformationCommand)
     assert needed[1].device_id == HexBytes("00D4")
     assert needed[2].device_id == HexBytes("00D4")
     assert all(not op.is_write() for op in needed)
 
     device.update(
-        DeviceInfoOp(
+        RequestDeviceInformationCommandResponse(
             firmware=6,
             model_id=HexBytes("B0"),
             device_id=HexBytes("00D4"),
             zones=(1, 2),
         )
     )
-    device.update(DeviceGuidOp(device_id=HexBytes("00D4"), guid=GUID))
+    device.update(NetworkSettingsDeviceGuidCommand(device_id=HexBytes("00D4"), guid=GUID))
     device.update(
-        ExtendedDeviceInfoOp(
+        RequestExtendedDeviceInformationCommandResponse(
             prefix=HexBytes("0000"),
             device_id=HexBytes("00D4"),
             model_info=HexBytes("0603001F260A0100C8"),
@@ -210,7 +210,7 @@ def test_hardware_model_input_count_overrides_inferred_input_count() -> None:
     device.input_count = 4
 
     device.update(
-        DeviceInfoOp(
+        RequestDeviceInformationCommandResponse(
             firmware=6,
             model_id=HexBytes("B0"),
             device_id=HexBytes("00D4"),
@@ -233,14 +233,14 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     assert output.max_volume is None
     assert all(not op.is_write() for op in output.needed_update_ops())
 
-    output.update(PowerOp(output=ALL_OUTPUTS, is_on=ToggleBool.On))
-    output.update(PowerOp(output=1, is_on=ToggleBool.Toggle))
-    output.update(MuteOp(output=1, is_muted=ToggleBool.Off))
-    output.update(SourceSelectOp(output=1, source=0x05))
-    output.update(SourceSelectOp(output=1, source=0xA6))
-    output.update(VolumeOp(output=1, volume=0.5))
-    output.update(MaxVolumeOp(output=1, max_volume=0.75))
-    output.update(OutputNameOp(output=1, name="Kitchen"))
+    output.update(StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.On))
+    output.update(StandbyPowerCommand(output=1, is_on=ToggleBool.Toggle))
+    output.update(MuteCommand(output=1, is_muted=ToggleBool.Off))
+    output.update(SourceSelectionCommand(output=1, source=0x05))
+    output.update(SourceSelectionCommand(output=1, source=0xA6))
+    output.update(VolumeCommand(output=1, volume=0.5))
+    output.update(MaximumVolumeCommand(output=1, max_volume=0.75))
+    output.update(ZoneNameCommand(output=1, name="Kitchen"))
 
     assert output.on is False
     assert output.muted is False
@@ -251,15 +251,15 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     assert output.needed_update_ops() == []
 
     unnamed = OutputState(id=13)
-    unnamed.update(OutputNameOp(output=13, name=""))
+    unnamed.update(ZoneNameCommand(output=13, name=""))
 
     assert unnamed.name == ""
     assert [type(op) for op in unnamed.needed_update_ops()] == [
-        PowerOp,
-        MuteOp,
-        SourceSelectOp,
-        VolumeOp,
-        MaxVolumeOp,
+        StandbyPowerCommand,
+        MuteCommand,
+        SourceSelectionCommand,
+        VolumeCommand,
+        MaximumVolumeCommand,
     ]
 
 
@@ -267,10 +267,10 @@ def test_remote_input_tracks_missing_read_only_update_ops_and_readbacks() -> Non
     remote_input = RemoteInput(id=3)
 
     assert remote_input.present is None
-    assert remote_input.needed_update_ops() == [RemoteSourceDiscoveryOp(slot_id=3)]
+    assert remote_input.needed_update_ops() == [DistributedSourceDefinitionRequestCommand(slot_id=3)]
 
     assert remote_input.update(
-        RemoteSourceInfoOp(
+        DistributedSourceDefinitionCommand(
             slot_id=3,
             backing_device_guid=GUID,
             source_index=6,
@@ -284,7 +284,7 @@ def test_remote_input_tracks_missing_read_only_update_ops_and_readbacks() -> Non
     assert remote_input.name == "M6250 OPT1"
     assert remote_input.needed_update_ops() == []
 
-    assert remote_input.update(RemoteSourceDeleteOp(slot_id=3))
+    assert remote_input.update(DistributedSourceDefinitionUnusedCommand(slot_id=3))
     assert remote_input.present is False
     assert remote_input.device_guid is None
     assert remote_input.source_index is None
@@ -309,7 +309,7 @@ def test_system_accepts_host_strings_and_builds_transports() -> None:
             assert single.transport.reconnection_wait_secs == 0.1
             assert single.transport.connection_timeout_secs == 0.2
             assert single.transport.trace is True
-            assert isinstance(single.transport.encoder, OpEncoder)
+            assert isinstance(single.transport.encoder, CommandEncoder)
             assert single.transport.encoder.read_only is False
         finally:
             single.shutdown()
@@ -334,9 +334,9 @@ def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None
         transport = FakeTransport()
         system = System(transport)  # type: ignore[arg-type]
         try:
-            transport.push(ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2)))
+            transport.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
             transport.push(
-                DeviceInfoOp(
+                RequestDeviceInformationCommandResponse(
                     firmware=6,
                     model_id=HexBytes("B0"),
                     device_id=HexBytes("00D4"),
@@ -344,18 +344,18 @@ def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None
                 )
             )
             transport.push(
-                SourceNameOp(
+                SourceNameOptionsCommand(
                     output=1,
                     source_selector=0x05,
-                    misc=HexBytes("000001"),
+                    options=HexBytes("000001"),
                     name="A1",
                 )
             )
-            transport.push(InputGainOp(output=1, source_selector=0xFF, gains=(0.0,) * 8))
-            transport.push(PowerOp(output=1, is_on=ToggleBool.On))
-            transport.push(OutputNameOp(output=1, name="Kitchen"))
+            transport.push(SourceGainCommand(output=1, source_selector=0xFF, gains=(0.0,) * 8))
+            transport.push(StandbyPowerCommand(output=1, is_on=ToggleBool.On))
+            transport.push(ZoneNameCommand(output=1, name="Kitchen"))
             transport.push(
-                RemoteSourceInfoOp(
+                DistributedSourceDefinitionCommand(
                     slot_id=3,
                     backing_device_guid=GUID,
                     source_index=6,
@@ -386,7 +386,7 @@ def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None
             assert system.state.remote_inputs[3].source_index == 6
             assert system.state.remote_inputs[3].name == "M6250 OPT1"
 
-            transport.push(RemoteSourceDeleteOp(slot_id=3))
+            transport.push(DistributedSourceDefinitionUnusedCommand(slot_id=3))
             await asyncio.sleep(0)
             await asyncio.sleep(0)
 
@@ -410,7 +410,7 @@ def test_device_host_info_updates_matching_device_identity_without_setting_host(
             device.guid = UUID("6c126887-df88-bd41-abbd-079c4e743694")
 
             transport.push(
-                DeviceHostInfoOp(
+                UndocumentedHostIdentityCommandResponse(
                     guid=UUID("8768126c-88df-41bd-abbd-079c4e743694"),
                     mac=HexBytes("ACE14F006012"),
                     detail=HexBytes("00"),
@@ -435,8 +435,8 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
         transport_201 = FakeTransport(host="10.1.0.201")
         system = System((transport_200, transport_201))  # type: ignore[arg-type]
         try:
-            transport_200.push(ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2)))
-            transport_201.push(ThisDeviceIdOp(device_id=HexBytes("6012"), zones=(9, 10)))
+            transport_200.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
+            transport_201.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("6012"), zones=(9, 10)))
             await asyncio.sleep(0)
             await asyncio.sleep(0)
 
@@ -452,31 +452,19 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
                 output.volume = 0.5
                 output.max_volume = 1.0
 
-            transport_201.push(PowerOp(output=ALL_OUTPUTS, is_on=ToggleBool.Off))
+            transport_201.push(StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.Off))
             await asyncio.sleep(0)
             await asyncio.sleep(0)
 
-            assert system.state.outputs[1].on is False
-            assert system.state.outputs[2].on is False
+            assert system.state.outputs[1].on is True
+            assert system.state.outputs[2].on is True
             assert system.state.outputs[9].on is False
             assert system.state.outputs[10].on is False
 
             system.all_outputs().mute()
 
-            assert transport_200.sent == (
-                [
-                    (
-                        MuteOp(output=1, is_muted=ToggleBool.On),
-                        MuteOp(output=2, is_muted=ToggleBool.On),
-                    )
-                ]
-            )
-            assert transport_201.sent == [
-                (
-                    MuteOp(output=9, is_muted=ToggleBool.On),
-                    MuteOp(output=10, is_muted=ToggleBool.On),
-                )
-            ]
+            assert transport_200.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
+            assert transport_201.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -498,7 +486,7 @@ def test_output_events_can_identify_device_transport_when_host_is_unknown() -> N
             output.volume = 0.5
             output.max_volume = 1.0
 
-            transport_201.push(PowerOp(output=9, is_on=ToggleBool.Off))
+            transport_201.push(StandbyPowerCommand(output=9, is_on=ToggleBool.Off))
             await asyncio.sleep(0)
             await asyncio.sleep(0)
 
@@ -507,7 +495,7 @@ def test_output_events_can_identify_device_transport_when_host_is_unknown() -> N
             system.output(9).mute()
 
             assert transport_200.sent == []
-            assert transport_201.sent == [(MuteOp(output=9, is_muted=ToggleBool.On),)]
+            assert transport_201.sent == [(MuteCommand(output=9, is_muted=ToggleBool.On),)]
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -523,14 +511,14 @@ def test_unknown_host_output_reads_fan_out_but_writes_do_not() -> None:
         try:
             system.state.devices[HexBytes("6012")].outputs = (9,)
 
-            system.send_ops(OutputNameRefreshOp(output=9))
-            system.send_ops(MuteOp(output=9, is_muted=ToggleBool.On))
+            system.send_ops(ZoneNameRequestCommand(output=9))
+            system.send_ops(MuteCommand(output=9, is_muted=ToggleBool.On))
 
             assert transport_200.sent == [
-                (OutputNameRefreshOp(output=9),),
-                (MuteOp(output=9, is_muted=ToggleBool.On),),
+                (ZoneNameRequestCommand(output=9),),
+                (MuteCommand(output=9, is_muted=ToggleBool.On),),
             ]
-            assert transport_201.sent == [(OutputNameRefreshOp(output=9),)]
+            assert transport_201.sent == [(ZoneNameRequestCommand(output=9),)]
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -560,40 +548,19 @@ def test_selector_commands_emit_typed_codec_ops_for_all_outputs() -> None:
             all_outputs.set_input(system.input_by_name("W1"))
 
             assert transport.sent == [
-                tuple(
-                    MuteOp(output=output_id, is_muted=ToggleBool.On)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    MuteOp(output=output_id, is_muted=ToggleBool.Off)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    PowerOp(output=output_id, is_on=ToggleBool.On)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    PowerOp(output=output_id, is_on=ToggleBool.Off)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    VolumeOp(output=output_id, volume=0.5)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    MaxVolumeOp(output=output_id, max_volume=0.75)
-                    for output_id in (1, 2, 9, 10)
-                ),
-                tuple(
-                    SourceSelectOp(output=output_id, source=0x20)
-                    for output_id in (1, 2, 9, 10)
-                ),
+                (MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),),
+                (MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.Off),),
+                (StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.On),),
+                (StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.Off),),
+                (VolumeCommand(output=ALL_OUTPUTS, volume=0.5),),
+                (MaximumVolumeCommand(output=ALL_OUTPUTS, max_volume=0.75),),
+                (SourceSelectionCommand(output=ALL_OUTPUTS, source=0x20),),
             ]
             assert all(
-                op.output != ALL_OUTPUTS
+                op.output == ALL_OUTPUTS
                 for batch in transport.sent
                 for op in batch
-                if isinstance(op, OutputOp)
+                if isinstance(op, OutputCommand)
             )
         finally:
             system.shutdown()
@@ -857,7 +824,7 @@ def test_system_wait_for_change_wakes_for_nested_state_updates() -> None:
             )
 
             await asyncio.sleep(0)
-            output.update(OutputNameOp(output=1, name="Kitchen"))
+            output.update(ZoneNameCommand(output=1, name="Kitchen"))
 
             assert await waiter == system.version
             assert system.version > baseline_version
@@ -879,7 +846,7 @@ def test_discover_remote_inputs_queries_all_slots_and_wakes_on_readbacks() -> No
                 for slot_id in REMOTE_INPUT_SLOT_IDS:
                     if slot_id == 3:
                         transport.push(
-                            RemoteSourceInfoOp(
+                            DistributedSourceDefinitionCommand(
                                 slot_id=slot_id,
                                 backing_device_guid=GUID,
                                 source_index=6,
@@ -887,7 +854,7 @@ def test_discover_remote_inputs_queries_all_slots_and_wakes_on_readbacks() -> No
                             )
                         )
                     else:
-                        transport.push(RemoteSourceDeleteOp(slot_id=slot_id))
+                        transport.push(DistributedSourceDefinitionUnusedCommand(slot_id=slot_id))
 
             asyncio.create_task(complete_remote_input_discovery())
             await asyncio.wait_for(
@@ -896,7 +863,7 @@ def test_discover_remote_inputs_queries_all_slots_and_wakes_on_readbacks() -> No
             )
 
             assert transport.sent[0] == tuple(
-                RemoteSourceDiscoveryOp(slot_id=slot_id) for slot_id in REMOTE_INPUT_SLOT_IDS
+                DistributedSourceDefinitionRequestCommand(slot_id=slot_id) for slot_id in REMOTE_INPUT_SLOT_IDS
             )
             assert list(system.state.remote_inputs) == list(REMOTE_INPUT_SLOT_IDS)
             assert system.state.remote_inputs[0].present is False
@@ -923,11 +890,11 @@ def test_system_refreshes_on_connection_interrupted_event() -> None:
 
             sent_ops = [op for batch in transport.sent for op in batch]
             assert sent_ops == [
-                PowerOp(output=ALL_OUTPUTS),
-                MuteOp(output=ALL_OUTPUTS),
-                SourceSelectOp(output=ALL_OUTPUTS),
-                VolumeOp(output=ALL_OUTPUTS),
-                MaxVolumeOp(output=ALL_OUTPUTS),
+                StandbyPowerCommand(output=ALL_OUTPUTS),
+                MuteCommand(output=ALL_OUTPUTS),
+                SourceSelectionCommand(output=ALL_OUTPUTS),
+                VolumeCommand(output=ALL_OUTPUTS),
+                MaximumVolumeCommand(output=ALL_OUTPUTS),
             ]
             assert all(not op.is_write() for op in sent_ops)
         finally:
@@ -976,8 +943,8 @@ def test_discover_devices_uses_this_device_id_to_map_each_transport_host() -> No
                 while not transport_200.sent or not transport_201.sent:
                     await asyncio.sleep(0)
 
-                transport_200.push(ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2)))
-                transport_201.push(ThisDeviceIdOp(device_id=HexBytes("6012"), zones=(9, 10)))
+                transport_200.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
+                transport_201.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("6012"), zones=(9, 10)))
                 await asyncio.sleep(0)
 
                 device_200 = system.state.devices[HexBytes("00D4")]
@@ -1000,8 +967,8 @@ def test_discover_devices_uses_this_device_id_to_map_each_transport_host() -> No
 
             first_200 = set(transport_200.sent[0])
             first_201 = set(transport_201.sent[0])
-            assert DeviceIdDiscoveryOp() in first_200
-            assert DeviceHostInfoDiscoveryOp() in first_200
+            assert RequestZoneAssignmentsCommand() in first_200
+            assert UndocumentedHostIdentityCommand() in first_200
             assert first_200 == first_201
             assert system.state.devices[HexBytes("00D4")].host == "10.1.0.200"
             assert system.state.devices[HexBytes("6012")].host == "10.1.0.201"
@@ -1034,8 +1001,8 @@ def test_discover_devices_waits_for_missing_multi_transport_hosts() -> None:
             async def complete_host_discovery() -> None:
                 while not transport_200.sent or not transport_201.sent:
                     await asyncio.sleep(0)
-                transport_200.push(ThisDeviceIdOp(device_id=HexBytes("00D4"), zones=(1, 2)))
-                transport_201.push(ThisDeviceIdOp(device_id=HexBytes("6012"), zones=(9, 10)))
+                transport_200.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
+                transport_201.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("6012"), zones=(9, 10)))
 
             asyncio.create_task(complete_host_discovery())
             await asyncio.wait_for(
@@ -1062,17 +1029,17 @@ def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -
 
             async def complete_input_discovery() -> None:
                 while not any(
-                    isinstance(op, SourceNameDiscoveryOp) and op.output == 6
+                    isinstance(op, SourceNameOptionsRequestCommand) and op.output == 6
                     for batch in transport.sent
                     for op in batch
                 ):
                     await asyncio.sleep(0)
 
                 transport.push(
-                    SourceNameOp(
+                    SourceNameOptionsCommand(
                         output=6,
                         source_selector=0,
-                        misc=HexBytes("000001"),
+                        options=HexBytes("000001"),
                         name="S0",
                     )
                 )
@@ -1081,10 +1048,10 @@ def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -
                     if selector == 0:
                         continue
                     transport.push(
-                        SourceNameOp(
+                        SourceNameOptionsCommand(
                             output=6,
                             source_selector=selector,
-                            misc=HexBytes("000001"),
+                            options=HexBytes("000001"),
                             name=f"S{selector}",
                         )
                     )
@@ -1102,7 +1069,7 @@ def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -
                 op
                 for batch in transport.sent
                 for op in batch
-                if isinstance(op, SourceNameDiscoveryOp)
+                if isinstance(op, SourceNameOptionsRequestCommand)
             ]
             assert {op.output for op in source_name_probes} == {1, 2, 6, 7}
             assert device.input_count == 8
@@ -1121,7 +1088,7 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
         system = System(transport)  # type: ignore[arg-type]
         try:
             system.update(
-                DeviceInfoOp(
+                RequestDeviceInformationCommandResponse(
                     firmware=6,
                     model_id=HexBytes("B0"),
                     device_id=HexBytes("00D4"),
@@ -1140,7 +1107,7 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
 
             async def complete_input_discovery() -> None:
                 while not any(
-                    isinstance(op, SourceNameDiscoveryOp) and op.output == 1
+                    isinstance(op, SourceNameOptionsRequestCommand) and op.output == 1
                     for batch in transport.sent
                     for op in batch
                 ):
@@ -1157,10 +1124,10 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
                 }
                 for selector, name in runtime_names.items():
                     transport.push(
-                        SourceNameOp(
+                        SourceNameOptionsCommand(
                             output=1,
                             source_selector=selector,
-                            misc=HexBytes("000001"),
+                            options=HexBytes("000001"),
                             name=name,
                         )
                     )
@@ -1171,7 +1138,7 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
                 timeout=1,
             )
 
-            assert SourceNameDiscoveryOp(output=1) in [
+            assert SourceNameOptionsRequestCommand(output=1) in [
                 op for batch in transport.sent for op in batch
             ]
             assert default_input.name == "W1"
@@ -1195,7 +1162,7 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
         system = System(transport)  # type: ignore[arg-type]
         try:
             system.update(
-                DeviceInfoOp(
+                RequestDeviceInformationCommandResponse(
                     firmware=6,
                     model_id=HexBytes("B0"),
                     device_id=HexBytes("00D4"),
@@ -1208,7 +1175,7 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
                     1
                     for batch in transport.sent
                     for op in batch
-                    if isinstance(op, SourceNameDiscoveryOp) and op.output == 1
+                    if isinstance(op, SourceNameOptionsRequestCommand) and op.output == 1
                 )
 
             async def complete_input_discovery() -> None:
@@ -1225,10 +1192,10 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
                 }
                 for selector, name in first_pass_names.items():
                     transport.push(
-                        SourceNameOp(
+                        SourceNameOptionsCommand(
                             output=1,
                             source_selector=selector,
-                            misc=HexBytes("000001"),
+                            options=HexBytes("000001"),
                             name=name,
                         )
                     )
@@ -1236,10 +1203,10 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
                 while source_name_probe_count() < 2:
                     await asyncio.sleep(0)
                 transport.push(
-                    SourceNameOp(
+                    SourceNameOptionsCommand(
                         output=1,
                         source_selector=0x04,
-                        misc=HexBytes("000001"),
+                        options=HexBytes("000001"),
                         name="OPT2",
                     )
                 )
@@ -1271,39 +1238,39 @@ def test_discover_outputs_resolves_names_then_refreshes_missing_status() -> None
             system.state.devices[HexBytes("6012")].outputs = (13, 14)
 
             async def complete_output_discovery() -> None:
-                system.state.outputs[13].update(OutputNameOp(output=13, name=""))
-                system.state.outputs[14].update(OutputNameOp(output=14, name="Pool"))
+                system.state.outputs[13].update(ZoneNameCommand(output=13, name=""))
+                system.state.outputs[14].update(ZoneNameCommand(output=14, name="Pool"))
                 await asyncio.sleep(0)
                 output = system.state.outputs[13]
-                output.update(PowerOp(output=13, is_on=ToggleBool.Off))
-                output.update(MuteOp(output=13, is_muted=ToggleBool.Off))
-                output.update(SourceSelectOp(output=13, source=0x05))
-                output.update(VolumeOp(output=13, volume=0.3125))
-                output.update(MaxVolumeOp(output=13, max_volume=0.75))
+                output.update(StandbyPowerCommand(output=13, is_on=ToggleBool.Off))
+                output.update(MuteCommand(output=13, is_muted=ToggleBool.Off))
+                output.update(SourceSelectionCommand(output=13, source=0x05))
+                output.update(VolumeCommand(output=13, volume=0.3125))
+                output.update(MaximumVolumeCommand(output=13, max_volume=0.75))
                 output = system.state.outputs[14]
-                output.update(PowerOp(output=14, is_on=ToggleBool.Off))
-                output.update(MuteOp(output=14, is_muted=ToggleBool.Off))
-                output.update(SourceSelectOp(output=14, source=0x05))
-                output.update(VolumeOp(output=14, volume=0.3125))
-                output.update(MaxVolumeOp(output=14, max_volume=0.75))
+                output.update(StandbyPowerCommand(output=14, is_on=ToggleBool.Off))
+                output.update(MuteCommand(output=14, is_muted=ToggleBool.Off))
+                output.update(SourceSelectionCommand(output=14, source=0x05))
+                output.update(VolumeCommand(output=14, volume=0.3125))
+                output.update(MaximumVolumeCommand(output=14, max_volume=0.75))
 
             asyncio.create_task(complete_output_discovery())
             await system.discover_outputs(time_between_probes_secs=0)
 
             batches = transport.sent
             assert batches[0] == (
-                PowerOp(output=ALL_OUTPUTS),
-                MuteOp(output=ALL_OUTPUTS),
-                SourceSelectOp(output=ALL_OUTPUTS),
-                VolumeOp(output=ALL_OUTPUTS),
-                MaxVolumeOp(output=ALL_OUTPUTS),
+                StandbyPowerCommand(output=ALL_OUTPUTS),
+                MuteCommand(output=ALL_OUTPUTS),
+                SourceSelectionCommand(output=ALL_OUTPUTS),
+                VolumeCommand(output=ALL_OUTPUTS),
+                MaximumVolumeCommand(output=ALL_OUTPUTS),
             )
-            assert batches[1] == (OutputNameRefreshOp(output=ALL_OUTPUTS),)
+            assert batches[1] == (ZoneNameRequestCommand(output=ALL_OUTPUTS),)
             sent_ops = [op for batch in batches[2:] for op in batch]
-            status_ops = [op for op in sent_ops if isinstance(op, OutputOp)]
+            status_ops = [op for op in sent_ops if isinstance(op, OutputCommand)]
             assert {op.output for op in status_ops} == {13, 14}
             assert all(
-                isinstance(op, (PowerOp, MuteOp, SourceSelectOp, VolumeOp, MaxVolumeOp))
+                isinstance(op, (StandbyPowerCommand, MuteCommand, SourceSelectionCommand, VolumeCommand, MaximumVolumeCommand))
                 for op in status_ops
             )
         finally:
@@ -1323,12 +1290,12 @@ def test_discover_outputs_wakes_when_transport_events_complete_state() -> None:
             async def complete_output_discovery() -> None:
                 while not transport.sent:
                     await asyncio.sleep(0)
-                transport.push(OutputNameOp(output=1, name="Kitchen"))
-                transport.push(PowerOp(output=1, is_on=ToggleBool.On))
-                transport.push(MuteOp(output=1, is_muted=ToggleBool.Off))
-                transport.push(SourceSelectOp(output=1, source=0x05))
-                transport.push(VolumeOp(output=1, volume=0.5))
-                transport.push(MaxVolumeOp(output=1, max_volume=0.75))
+                transport.push(ZoneNameCommand(output=1, name="Kitchen"))
+                transport.push(StandbyPowerCommand(output=1, is_on=ToggleBool.On))
+                transport.push(MuteCommand(output=1, is_muted=ToggleBool.Off))
+                transport.push(SourceSelectionCommand(output=1, source=0x05))
+                transport.push(VolumeCommand(output=1, volume=0.5))
+                transport.push(MaximumVolumeCommand(output=1, max_volume=0.75))
 
             asyncio.create_task(complete_output_discovery())
             await asyncio.wait_for(

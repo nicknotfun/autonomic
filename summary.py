@@ -7,11 +7,11 @@ import click
 
 from amp.byte_utils import HexBytes
 from amp.codec import (
-    DeviceGuidQueryOp,
-    DeviceInfoDiscoveryOp,
-    OutputNameRefreshOp,
-    PowerOp,
-    SourceNameDiscoveryOp,
+    NetworkSettingsDeviceGuidRequestCommand,
+    RequestDeviceInformationCommand,
+    ZoneNameRequestCommand,
+    StandbyPowerCommand,
+    SourceNameOptionsRequestCommand,
     connect,
 )
 
@@ -41,13 +41,13 @@ async def run(
         connection_timeout_secs=timeout,
     ) as transport:
         bootstrap_ops = [
-            PowerOp(),
-            DeviceGuidQueryOp(device_id=device_id),
-            OutputNameRefreshOp(),
-            DeviceInfoDiscoveryOp(),
+            StandbyPowerCommand(),
+            NetworkSettingsDeviceGuidRequestCommand(device_id=device_id),
+            ZoneNameRequestCommand(),
+            RequestDeviceInformationCommand(),
         ]
         if source_names:
-            bootstrap_ops.append(SourceNameDiscoveryOp(output=source_output))
+            bootstrap_ops.append(SourceNameOptionsRequestCommand(output=source_output))
         transport.send(*bootstrap_ops)
         await asyncio.sleep(listen_secs)
 

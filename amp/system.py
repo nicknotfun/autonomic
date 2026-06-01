@@ -7,7 +7,7 @@ from typing import Any, TypeAlias, TypeGuard, TypeVar, cast
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
-from amp.codec import ALL_OUTPUTS, Op, SourceNameOp
+from amp.codec import ALL_OUTPUTS, Command, SourceNameOptionsCommand
 import amp.codec as codec
 from amp.hardware import model_by_number
 from amp.toggle_bool import ToggleBool
@@ -51,32 +51,32 @@ class DeviceState(VersionedState):
             self.output_count = len(self.outputs)
         return self.version != old_version
 
-    def update(self, op: codec.DeviceIdOp) -> bool:
+    def update(self, op: codec.DeviceIdCommand) -> bool:
         if op.device_id != self.id:
             return False
         old_version = self.version
         match op:
-            case codec.DeviceInfoOp():
+            case codec.RequestDeviceInformationCommandResponse():
                 self.firmware = op.firmware
                 self.model_id = op.model_id
                 self.outputs = op.zones
-            case codec.ThisDeviceIdOp():
+            case codec.RequestZoneAssignmentsCommandResponse():
                 self.outputs = op.zones
-            case codec.DeviceGuidOp():
+            case codec.NetworkSettingsDeviceGuidCommand():
                 self.guid = op.guid
-            case codec.ExtendedDeviceInfoOp():
+            case codec.RequestExtendedDeviceInformationCommandResponse():
                 self.mac = op.mac
         self.apply_hardware_defaults()
         return self.version != old_version
 
-    def needed_update_ops(self) -> list[codec.Op]:
-        ops: list[codec.Op] = []
+    def needed_update_ops(self) -> list[codec.Command]:
+        ops: list[codec.Command] = []
         if self.firmware is None or self.model_id is None or self.outputs is None:
-            ops.append(codec.DeviceInfoDiscoveryOp())
+            ops.append(codec.RequestDeviceInformationCommand())
         if self.guid is None:
-            ops.append(codec.DeviceGuidQueryOp(device_id=self.id))
+            ops.append(codec.NetworkSettingsDeviceGuidRequestCommand(device_id=self.id))
         if self.mac is None:
-            ops.append(codec.ExtendedDeviceInfoDiscoveryOp(device_id=self.id))
+            ops.append(codec.RequestExtendedDeviceInformationCommand(device_id=self.id))
         return ops
 
 
@@ -163,7 +163,7 @@ class InputState(VersionedState):
             )
         return HexBytes(device_id_str), selector
 
-    def update(self, op: SourceNameOp) -> None:
+    def update(self, op: SourceNameOptionsCommand) -> None:
         if op.name is None:
             return
         self.assigned_name = op.name
@@ -182,42 +182,42 @@ class OutputState(VersionedState):
     volume: float | None = None
     max_volume: float | None = None
 
-    def needed_update_ops(self) -> list[codec.Op]:
-        ops: list[codec.Op] = []
+    def needed_update_ops(self) -> list[codec.Command]:
+        ops: list[codec.Command] = []
         if self.name is None:
-            ops.append(codec.OutputNameRefreshOp(output=self.id))
+            ops.append(codec.ZoneNameRequestCommand(output=self.id))
         if self.on is None:
-            ops.append(codec.PowerOp(output=self.id))
+            ops.append(codec.StandbyPowerCommand(output=self.id))
         if self.muted is None:
-            ops.append(codec.MuteOp(output=self.id))
+            ops.append(codec.MuteCommand(output=self.id))
         if self.source is None:
-            ops.append(codec.SourceSelectOp(output=self.id))
+            ops.append(codec.SourceSelectionCommand(output=self.id))
         if self.volume is None:
-            ops.append(codec.VolumeOp(output=self.id))
+            ops.append(codec.VolumeCommand(output=self.id))
         if self.max_volume is None:
-            ops.append(codec.MaxVolumeOp(output=self.id))
+            ops.append(codec.MaximumVolumeCommand(output=self.id))
         return ops
 
-    def update(self, op: codec.OutputOp) -> None:
+    def update(self, op: codec.OutputCommand) -> None:
         if op.output != self.id and op.output != ALL_OUTPUTS:
             return
         match op:
-            case codec.PowerOp():
+            case codec.StandbyPowerCommand():
                 if op.is_on is not None:
                     self.on = op.is_on.as_bool(self.on)
-            case codec.MuteOp():
+            case codec.MuteCommand():
                 if op.is_muted is not None:
                     self.muted = op.is_muted.as_bool(self.muted)
-            case codec.SourceSelectOp():
+            case codec.SourceSelectionCommand():
                 if op.source is not None:
                     self.source = op.source & 0x7F
-            case codec.VolumeOp():
+            case codec.VolumeCommand():
                 if op.volume is not None:
                     self.volume = op.volume
-            case codec.MaxVolumeOp():
+            case codec.MaximumVolumeCommand():
                 if op.max_volume is not None:
                     self.max_volume = op.max_volume
-            case codec.OutputNameOp():
+            case codec.ZoneNameCommand():
                 if op.name is not None:
                     self.name = op.name
 
@@ -229,26 +229,26 @@ class RemoteInput(VersionedState):
     source_index: int | None = None
     name: str | None = None
 
-    def update(self, op: codec.RemoteSourceSlotOp) -> bool:
+    def update(self, op: codec.DistributedSourceDefinitionSlotCommand) -> bool:
         if op.slot_id != self.id:
             return False
         old_version = self.version
         match op:
-            case codec.RemoteSourceInfoOp():
+            case codec.DistributedSourceDefinitionCommand():
                 self.present = True
                 self.device_guid = op.backing_device_guid
                 self.source_index = op.source_index
                 self.name = op.name
-            case codec.RemoteSourceDeleteOp():
+            case codec.DistributedSourceDefinitionUnusedCommand():
                 self.present = False
                 self.device_guid = None
                 self.source_index = None
                 self.name = None
         return self.version != old_version
 
-    def needed_update_ops(self) -> list[codec.Op]:
+    def needed_update_ops(self) -> list[codec.Command]:
         if self.present is None:
-            return [codec.RemoteSourceDiscoveryOp(slot_id=self.id)]
+            return [codec.DistributedSourceDefinitionRequestCommand(slot_id=self.id)]
         return []
 
 
@@ -341,10 +341,10 @@ class SystemState(VersionTrackerMixin):
             self.remote_inputs[remote_input_id].merge(other_remote_input)
 
 
-TransportArgument: TypeAlias = Transport[Op] | Iterable[Transport[Op]] | str | Iterable[str]
+TransportArgument: TypeAlias = Transport[Command] | Iterable[Transport[Command]] | str | Iterable[str]
 
 
-def _is_transport(value: object) -> TypeGuard[Transport[Op]]:
+def _is_transport(value: object) -> TypeGuard[Transport[Command]]:
     return hasattr(value, "send") and hasattr(value, "recv") and hasattr(value, "shutdown")
 
 
@@ -356,7 +356,7 @@ def _normalize_transport_argument(
     connection_timeout_secs: float,
     trace: bool,
     read_only: bool,
-) -> tuple[Transport[Op], ...]:
+) -> tuple[Transport[Command], ...]:
     if isinstance(transport_arg, str):
         return (
             codec.connect(
@@ -371,7 +371,7 @@ def _normalize_transport_argument(
     elif _is_transport(transport_arg):
         return (transport_arg,)
     else:
-        transports: list[Transport[Op]] = []
+        transports: list[Transport[Command]] = []
         for item in cast(Iterable[TransportArgument], transport_arg):
             transports.extend(
                 _normalize_transport_argument(
@@ -411,7 +411,7 @@ class System(VersionTrackerMixin):
             raise ValueError("System requires at least one transport")
         self.transport = self.transports[0]
         self._transports_by_host = {transport.host: transport for transport in self.transports}
-        self._pending_device_host_info: list[codec.DeviceHostInfoOp] = []
+        self._pending_device_host_info: list[codec.UndocumentedHostIdentityCommandResponse] = []
         self.state = state or SystemState()
         self.state._parent_version_tracker = self
         self.apply_hardware_defaults()
@@ -500,28 +500,28 @@ class System(VersionTrackerMixin):
     def input_for_device_selector(self, device_id: HexBytes, selector: int) -> InputState | None:
         return self.state.inputs.get((device_id, selector))
 
-    def transport_for_device(self, device: DeviceState) -> Transport[Op] | None:
+    def transport_for_device(self, device: DeviceState) -> Transport[Command] | None:
         if device.host is None:
             return None
         return self._transports_by_host.get(device.host)
 
-    def transport_for_device_id(self, device_id: HexBytes) -> Transport[Op] | None:
+    def transport_for_device_id(self, device_id: HexBytes) -> Transport[Command] | None:
         device = self.state.devices.get(device_id)
         if device is None:
             return None
         return self.transport_for_device(device)
 
-    def transport_for_output(self, output_id: int) -> Transport[Op]:
+    def transport_for_output(self, output_id: int) -> Transport[Command]:
         device = self.device_for_output(output_id)
         if device is None:
             return self.transport
         return self.transport_for_device(device) or self.transport
 
-    def _target_transports_for_op(self, op: Op) -> tuple[Transport[Op], ...]:
+    def _target_transports_for_op(self, op: Command) -> tuple[Transport[Command], ...]:
         match op:
-            case codec.OutputOp(output=output_id) if output_id == ALL_OUTPUTS:
+            case codec.OutputCommand(output=output_id) if output_id == ALL_OUTPUTS:
                 return self.transports
-            case codec.OutputOp(output=output_id):
+            case codec.OutputCommand(output=output_id):
                 device = self.device_for_output(output_id)
                 if device is not None:
                     if transport := self.transport_for_device(device):
@@ -529,21 +529,36 @@ class System(VersionTrackerMixin):
                     if not op.is_write():
                         return self.transports
                 return (self.transport,)
-            case codec.DeviceIdOp(device_id=device_id):
+            case codec.DeviceIdCommand(device_id=device_id):
                 if transport := self.transport_for_device_id(device_id):
                     return (transport,)
                 return self.transports
             case _:
                 return self.transports
 
-    def send_ops(self, *ops: Op, transport: Transport[Op] | None = None) -> None:
+    def _outputs_for_all_outputs_event(
+        self,
+        transport: Transport[Command] | None,
+    ) -> tuple[OutputState, ...]:
+        if transport is not None:
+            output_ids = {
+                output_id
+                for device in self.state.devices.values()
+                if device.host == transport.host
+                for output_id in (device.outputs or ())
+            }
+            if output_ids:
+                return tuple(self.state.outputs[output_id] for output_id in sorted(output_ids))
+        return tuple(self.state.outputs.values())
+
+    def send_ops(self, *ops: Command, transport: Transport[Command] | None = None) -> None:
         if transport is not None:
             routed_ops = [op for op in ops if transport in self._target_transports_for_op(op)]
             if routed_ops:
                 transport.send(*routed_ops)
             return
 
-        ops_by_transport: dict[Transport[Op], list[Op]] = {}
+        ops_by_transport: dict[Transport[Command], list[Command]] = {}
         for op in ops:
             for target_transport in self._target_transports_for_op(op):
                 ops_by_transport.setdefault(target_transport, []).append(op)
@@ -557,7 +572,7 @@ class System(VersionTrackerMixin):
             if not self._apply_device_host_info(op):
                 self._pending_device_host_info.append(op)
 
-    def _apply_device_host_info(self, op: codec.DeviceHostInfoOp) -> bool:
+    def _apply_device_host_info(self, op: codec.UndocumentedHostIdentityCommandResponse) -> bool:
         candidates = set(op.candidate_guids)
         matched = False
         for device in self.state.devices.values():
@@ -574,31 +589,31 @@ class System(VersionTrackerMixin):
 
     def update(
         self,
-        op: Op | ConnectionInterrupted,
-        transport: Transport[Op] | None = None,
+        op: Command | ConnectionInterrupted,
+        transport: Transport[Command] | None = None,
     ) -> None:
         match op:
             case ConnectionInterrupted():
                 self.refresh(transport=transport)
-            case codec.ThisDeviceIdOp():
+            case codec.RequestZoneAssignmentsCommandResponse():
                 device = self.state.devices[op.device_id]
                 device.host = transport.host if transport is not None else self.transport.host
                 device.update(op)
                 self.apply_hardware_defaults()
-            case codec.SourceNameOp():
+            case codec.SourceNameOptionsCommand():
                 if source_device := self.device_for_output(op.output):
                     self.state.inputs[(source_device.id, op.source_selector)].update(op)
-            case codec.DeviceIdOp():
+            case codec.DeviceIdCommand():
                 self.state.devices[op.device_id].update(op)
                 self.apply_hardware_defaults()
                 self._apply_pending_device_host_info()
-            case codec.DeviceHostInfoOp():
+            case codec.UndocumentedHostIdentityCommandResponse():
                 if not self._apply_device_host_info(op):
                     self._pending_device_host_info.append(op)
-            case codec.RemoteSourceSlotOp(slot_id=int(slot_id)):
+            case codec.DistributedSourceDefinitionSlotCommand(slot_id=int(slot_id)):
                 self.state.remote_inputs[slot_id].update(op)
-            case codec.OutputOp():
-                if isinstance(op, codec.InputGainOp):
+            case codec.OutputCommand():
+                if isinstance(op, codec.SourceGainCommand):
                     # Input gain ops are how we can discover the number of expected outputs for a device!
                     gain_device = self.device_for_output(op.output)
                     if (
@@ -610,7 +625,7 @@ class System(VersionTrackerMixin):
                         gain_device.input_count = len(op.gains)
 
                 if op.output == ALL_OUTPUTS:
-                    for output in self.state.outputs.values():
+                    for output in self._outputs_for_all_outputs_event(transport):
                         output.update(op)
                 else:
                     if transport is not None:
@@ -619,7 +634,7 @@ class System(VersionTrackerMixin):
                                 output_device.host = transport.host
                     self.state.outputs[op.output].update(op)
 
-    async def _handle_events(self, transport: Transport[Op]) -> None:
+    async def _handle_events(self, transport: Transport[Command]) -> None:
         async for op in transport.recv():
             self.update(op, transport=transport)
 
@@ -627,20 +642,20 @@ class System(VersionTrackerMixin):
         self,
         include_names: bool = False,
         *,
-        transport: Transport[Op] | None = None,
+        transport: Transport[Command] | None = None,
     ) -> None:
         self.send_ops(
-            codec.PowerOp(output=ALL_OUTPUTS),
-            codec.MuteOp(output=ALL_OUTPUTS),
-            codec.SourceSelectOp(output=ALL_OUTPUTS),
-            codec.VolumeOp(output=ALL_OUTPUTS),
-            codec.MaxVolumeOp(output=ALL_OUTPUTS),
+            codec.StandbyPowerCommand(output=ALL_OUTPUTS),
+            codec.MuteCommand(output=ALL_OUTPUTS),
+            codec.SourceSelectionCommand(output=ALL_OUTPUTS),
+            codec.VolumeCommand(output=ALL_OUTPUTS),
+            codec.MaximumVolumeCommand(output=ALL_OUTPUTS),
             transport=transport,
         )
         if include_names:
-            self.send_ops(codec.OutputNameRefreshOp(output=ALL_OUTPUTS), transport=transport)
+            self.send_ops(codec.ZoneNameRequestCommand(output=ALL_OUTPUTS), transport=transport)
 
-    def refresh(self, *, transport: Transport[Op] | None = None) -> None:
+    def refresh(self, *, transport: Transport[Command] | None = None) -> None:
         """Don't block on configuration, but fill gaps and refresh dynamic output info."""
         for device in self.state.devices.values():
             self.send_ops(*device.needed_update_ops(), transport=transport)
@@ -656,12 +671,12 @@ class System(VersionTrackerMixin):
         *,
         time_between_probes_secs: float = 0.5,
     ) -> None:
-        def determine_delta() -> tuple[list[DeviceState], set[codec.Op], set[codec.Op]]:
+        def determine_delta() -> tuple[list[DeviceState], set[codec.Command], set[codec.Command]]:
             incomplete_devices = []
-            probe_ops: set[codec.Op] = set()
-            best_effort_probe_ops: set[codec.Op] = set()
+            probe_ops: set[codec.Command] = set()
+            best_effort_probe_ops: set[codec.Command] = set()
 
-            def mark_incomplete(device: DeviceState, op: codec.Op) -> None:
+            def mark_incomplete(device: DeviceState, op: codec.Command) -> None:
                 incomplete_devices.append(device)
                 probe_ops.add(op)
 
@@ -671,11 +686,11 @@ class System(VersionTrackerMixin):
                 if device.outputs and device.input_count is None:
                     for output_id in device.outputs:
                         best_effort_probe_ops.add(
-                            codec.InputGainOp(output=output_id, source_selector=0xFF)
+                            codec.SourceGainCommand(output=output_id, source_selector=0xFF)
                         )
             return incomplete_devices, probe_ops, best_effort_probe_ops
 
-        def missing_host_transports() -> list[Transport[Op]]:
+        def missing_host_transports() -> list[Transport[Command]]:
             if len(self.transports) == 1:
                 return []
             return [
@@ -687,11 +702,11 @@ class System(VersionTrackerMixin):
         while True:
             incomplete_devices, probe_ops, best_effort_probe_ops = determine_delta()
             has_enough_devices = len(self.state.devices) >= target_devices
-            host_probe_ops: set[codec.Op] = set()
+            host_probe_ops: set[codec.Command] = set()
             missing_hosts = missing_host_transports()
             if missing_hosts:
-                host_probe_ops.add(codec.DeviceIdDiscoveryOp())
-                host_probe_ops.add(codec.DeviceHostInfoDiscoveryOp())
+                host_probe_ops.add(codec.RequestZoneAssignmentsCommand())
+                host_probe_ops.add(codec.UndocumentedHostIdentityCommand())
 
             if has_enough_devices and not incomplete_devices and not missing_hosts:
                 if best_effort_probe_ops or host_probe_ops:
@@ -699,8 +714,8 @@ class System(VersionTrackerMixin):
                 break
 
             if not has_enough_devices:
-                probe_ops.add(codec.DeviceIdDiscoveryOp())
-                probe_ops.add(codec.DeviceInfoDiscoveryOp())
+                probe_ops.add(codec.RequestZoneAssignmentsCommand())
+                probe_ops.add(codec.RequestDeviceInformationCommand())
 
             previous_version = self.version
             self.send_ops(*(probe_ops | best_effort_probe_ops | host_probe_ops))
@@ -741,8 +756,8 @@ class System(VersionTrackerMixin):
             if detected_inputs > 0:
                 device.input_count = detected_inputs
 
-        def determine_probe_ops() -> tuple[list[codec.Op], bool]:
-            probe_ops: list[codec.Op] = []
+        def determine_probe_ops() -> tuple[list[codec.Command], bool]:
+            probe_ops: list[codec.Command] = []
             any_devices_with_unknown_input_count = False
             for device in devices_with_outputs:
                 infer_unknown_input_count_after_deadline(device)
@@ -774,7 +789,7 @@ class System(VersionTrackerMixin):
                             asyncio.get_running_loop().time()
                             + time_to_wait_for_devices_with_unknown_inputs
                         )
-                    probe_ops.append(codec.SourceNameDiscoveryOp(output=output_id))
+                    probe_ops.append(codec.SourceNameOptionsRequestCommand(output=output_id))
             return probe_ops, any_devices_with_unknown_input_count
 
         def input_tables_ready() -> bool:
@@ -817,8 +832,8 @@ class System(VersionTrackerMixin):
         for slot_id in slot_ids:
             _ = self.state.remote_inputs[slot_id]
 
-        def needed_probe_ops() -> list[codec.Op]:
-            probe_ops: list[codec.Op] = []
+        def needed_probe_ops() -> list[codec.Command]:
+            probe_ops: list[codec.Command] = []
             for slot_id in slot_ids:
                 probe_ops.extend(self.state.remote_inputs[slot_id].needed_update_ops())
             return probe_ops
@@ -842,8 +857,8 @@ class System(VersionTrackerMixin):
 
         self.refresh_outputs(include_names=True)
 
-        def needed_probe_ops() -> set[codec.Op]:
-            probe_ops: set[codec.Op] = set()
+        def needed_probe_ops() -> set[codec.Command]:
+            probe_ops: set[codec.Command] = set()
             for output in self.state.outputs.values():
                 probe_ops.update(output.needed_update_ops())
             return probe_ops
@@ -982,12 +997,9 @@ class OutputSelector:
         if not self.is_all_outputs:
             return (self.output_id,)
 
-        output_ids = set(self.system.state.outputs)
-        for device in self.system.state.devices.values():
-            output_ids.update(device.outputs or ())
-        return tuple(sorted(output_ids))
+        return (ALL_OUTPUTS,)
 
-    def _send_output_ops(self, ops: Iterable[codec.OutputOp]) -> None:
+    def _send_output_ops(self, ops: Iterable[codec.OutputCommand]) -> None:
         ops = tuple(ops)
         if ops:
             self.system.send_ops(*ops)
@@ -1073,7 +1085,7 @@ class OutputSelector:
 
     def enable(self, on: bool = True) -> None:
         self._send_output_ops(
-            codec.PowerOp(
+            codec.StandbyPowerCommand(
                 output=output_id,
                 is_on=ToggleBool.On if on else ToggleBool.Off,
             )
@@ -1085,7 +1097,7 @@ class OutputSelector:
 
     def mute(self, muted: bool = True) -> None:
         self._send_output_ops(
-            codec.MuteOp(
+            codec.MuteCommand(
                 output=output_id,
                 is_muted=ToggleBool.On if muted else ToggleBool.Off,
             )
@@ -1097,19 +1109,19 @@ class OutputSelector:
 
     def set_volume(self, volume: float) -> None:
         self._send_output_ops(
-            codec.VolumeOp(output=output_id, volume=volume)
+            codec.VolumeCommand(output=output_id, volume=volume)
             for output_id in self._target_output_ids()
         )
 
     def set_max_volume(self, max_volume: float) -> None:
         self._send_output_ops(
-            codec.MaxVolumeOp(output=output_id, max_volume=max_volume)
+            codec.MaximumVolumeCommand(output=output_id, max_volume=max_volume)
             for output_id in self._target_output_ids()
         )
 
     def set_input(self, input: "InputSelector") -> None:
         self._send_output_ops(
-            codec.SourceSelectOp(
+            codec.SourceSelectionCommand(
                 output=output_id,
                 source=input.selector,
             )

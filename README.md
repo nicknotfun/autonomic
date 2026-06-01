@@ -27,11 +27,11 @@ For this checkout, `.venv` points at `~/.venvs/default`.
 ## Protocol Reference
 
 [PROTOCOL.md](PROTOCOL.md) is a repository-independent description of the direct
-amplifier wire protocol: row format, opcode families, value encoding, source
+amplifier wire protocol: row format, command families, value encoding, source
 selector tables, and observed MA6/M6250 behavior.
 
 The implementation catalog lives in [amp/codec.py](amp/codec.py). It models rows
-as typed operation objects and uses [amp/encoder.py](amp/encoder.py) to encode
+as typed command objects and uses [amp/encoder.py](amp/encoder.py) to encode
 and decode declarative patterns.
 
 ## Quick Start
@@ -39,32 +39,32 @@ and decode declarative patterns.
 Decode a row:
 
 ```python
-from amp.codec import OpEncoder
+from amp.codec import CommandEncoder
 
-op = OpEncoder().decoder(bytes.fromhex("040150"))
-print(op)
+command = CommandEncoder().decoder(bytes.fromhex("040150"))
+print(command)
 ```
 
 Encode a write row:
 
 ```python
-from amp.codec import OpEncoder, VolumeOp
+from amp.codec import CommandEncoder, VolumeCommand
 
-encoder = OpEncoder(read_only=False)
-row = encoder.encode(VolumeOp(output=1, volume=0.5))
+encoder = CommandEncoder(read_only=False)
+row = encoder.encode(VolumeCommand(output=1, volume=0.5))
 print(row)  # 040150
 ```
 
 Open a direct amplifier transport:
 
 ```python
-from amp.codec import VolumeOp, connect
+from amp.codec import VolumeCommand, connect
 
 transport = connect("10.1.0.200")
-transport.send(VolumeOp(output=1))
+transport.send(VolumeCommand(output=1))
 ```
 
-`OpEncoder(read_only=True)` is the default, so write-like ops are filtered
+`CommandEncoder(read_only=True)` is the default, so write-like commands are filtered
 unless `read_only=False` is passed.
 
 Build a system snapshot:
@@ -160,7 +160,7 @@ queries so dynamic state is repopulated after reconnect.
 
 ## Selectors
 
-The public selector API wraps state entries and emits typed protocol operations:
+The public selector API wraps state entries and emits typed protocol commands:
 
 ```python
 system.output(1).set_volume(0.5)
@@ -169,8 +169,8 @@ system.all_outputs().enable()
 system.all_outputs().set_input(system.input_by_name("W1"))
 ```
 
-`system.all_outputs()` fans out write commands per output. This avoids relying on
-the protocol's `FF` output selector for writes.
+`system.all_outputs()` sends one `FF` all-output command to each device
+transport, so a multi-device system gets one broadcast per connected device.
 
 `system.all_inputs()` returns a tuple of `InputSelector` objects for every input
 currently in `system.state.inputs`.
@@ -191,7 +191,7 @@ It currently includes:
 - MA6 (`E9`): 8 outputs, 19 hardware inputs including casting sources
 
 Only local and casting hardware sources are included. Remote/eAudioCast sources
-are discovered from runtime source-name and remote-source-slot rows.
+are discovered from runtime source-name and distributed-source-slot rows.
 
 ## Examples
 
@@ -214,7 +214,7 @@ Write examples construct `System(..., read_only=False)`.
   byte order, and UTF-8.
 - `amp/toggle_bool.py`: shared power/mute toggle value type.
 - `amp/encoder.py`: declarative pattern compiler and subclass encoder.
-- `amp/codec.py`: protocol operation dataclasses and opcode patterns.
+- `amp/codec.py`: protocol command dataclasses and command-byte patterns.
 - `amp/hardware.py`: observed hardware model metadata keyed by model number.
 - `amp/system.py`: in-memory system state and selector API built from decoded
   rows.
