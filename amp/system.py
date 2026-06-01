@@ -45,8 +45,7 @@ class DeviceState(VersionedState):
         if self.model_id is not None:
             model = model_by_number(self.model_id)
             if model is not None:
-                if self.input_count is None:
-                    self.input_count = model.input_count
+                self.input_count = model.input_count
                 self.output_count = model.output_count
         if self.output_count is None and self.outputs is not None:
             self.output_count = len(self.outputs)
@@ -689,6 +688,13 @@ class System(VersionTrackerMixin):
                     continue
 
                 probed_outputs = probed_outputs_by_device.setdefault(device.id, set())
+                if (
+                    device.input_count is not None
+                    and detected_inputs < device.input_count
+                    and device.outputs is not None
+                    and all(output_id in probed_outputs for output_id in device.outputs)
+                ):
+                    probed_outputs.clear()
                 for output_id in device.outputs or ():
                     if output_id in probed_outputs:
                         continue
@@ -722,7 +728,6 @@ class System(VersionTrackerMixin):
                     return False
             return True
 
-        first_probe = True
         while True:
             probe_ops, any_devices_with_unknown_input_count = determine_probe_ops()
             if not probe_ops:
@@ -731,12 +736,9 @@ class System(VersionTrackerMixin):
             self.send_ops(*probe_ops)
 
             probe_time = time_between_probes_secs
-            if first_probe:
-                probe_time = time_to_wait_for_devices_with_unknown_inputs
-            elif any_devices_with_unknown_input_count:
+            if any_devices_with_unknown_input_count:
                 probe_time = time_to_wait_for_devices_with_unknown_inputs
             await self.wait_for_ready(input_tables_ready, probe_time)
-            first_probe = False
 
     async def discover_remote_inputs(
         self,
@@ -857,6 +859,12 @@ class System(VersionTrackerMixin):
         if prefer_remote:
             return self.input_by_name(name, prefer_remote=False)
         raise ValueError(f"Input with name {name} not found")
+
+    def all_inputs(self) -> "tuple[InputSelector, ...]":
+        return tuple(
+            InputSelector(self, input.device_id, input.selector)
+            for input in self.state.inputs.values()
+        )
 
 
 class DeviceSelector:

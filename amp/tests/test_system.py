@@ -177,6 +177,23 @@ def test_device_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     assert device.needed_update_ops() == []
 
 
+def test_hardware_model_input_count_overrides_inferred_input_count() -> None:
+    device = DeviceState(id=HexBytes("00D4"))
+    device.input_count = 4
+
+    device.update(
+        DeviceInfoOp(
+            firmware=6,
+            model_id=HexBytes("B0"),
+            device_id=HexBytes("00D4"),
+            zones=(1, 2),
+        )
+    )
+
+    assert device.input_count == 8
+    assert device.output_count == 8
+
+
 def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     output = OutputState(id=1)
 
@@ -597,6 +614,31 @@ def test_by_name_selectors_ignore_case_and_whitespace() -> None:
             assert system.input_by_name(" playerc ").selector == 0x26
             assert system.input_by_name("KITCHENinput").selector == 0x05
             assert system.output_by_name(" patio   west ").output_id == 1
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_all_inputs_returns_selectors_for_current_inputs() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)  # type: ignore[arg-type]
+        try:
+            input_b = system.state.inputs[(HexBytes("6012"), 0x09)]
+            input_b.name = "Input B"
+            input_a = system.state.inputs[(HexBytes("00D4"), 0x05)]
+            input_a.name = "Input A"
+
+            selectors = system.all_inputs()
+
+            assert tuple(selector.name for selector in selectors) == ("Input A", "Input B")
+            assert tuple(selector.selector for selector in selectors) == (0x05, 0x09)
+            assert tuple(selector.input.device_id for selector in selectors) == (
+                HexBytes("00D4"),
+                HexBytes("6012"),
+            )
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -1067,6 +1109,80 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
             assert default_input.name == "Runtime OPT1"
             assert default_input.default_name == "OPT1"
             assert default_input.name_discovered is True
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)  # type: ignore[arg-type]
+        try:
+            system.update(
+                DeviceInfoOp(
+                    firmware=6,
+                    model_id=HexBytes("B0"),
+                    device_id=HexBytes("00D4"),
+                    zones=(1,),
+                )
+            )
+
+            def source_name_probe_count() -> int:
+                return sum(
+                    1
+                    for batch in transport.sent
+                    for op in batch
+                    if isinstance(op, SourceNameDiscoveryOp) and op.output == 1
+                )
+
+            async def complete_input_discovery() -> None:
+                while source_name_probe_count() < 1:
+                    await asyncio.sleep(0)
+                first_pass_names = {
+                    0x05: "A1",
+                    0x06: "A2",
+                    0x07: "A3",
+                    0x03: "A4",
+                    0x00: "COAX1",
+                    0x01: "COAX2",
+                    0x02: "OPT1",
+                }
+                for selector, name in first_pass_names.items():
+                    transport.push(
+                        SourceNameOp(
+                            output=1,
+                            source_selector=selector,
+                            misc=HexBytes("000001"),
+                            name=name,
+                        )
+                    )
+
+                while source_name_probe_count() < 2:
+                    await asyncio.sleep(0)
+                transport.push(
+                    SourceNameOp(
+                        output=1,
+                        source_selector=0x04,
+                        misc=HexBytes("000001"),
+                        name="OPT2",
+                    )
+                )
+
+            asyncio.create_task(complete_input_discovery())
+            await asyncio.wait_for(
+                system.discover_inputs(
+                    time_between_probes_secs=0.01,
+                    time_to_wait_for_devices_with_unknown_inputs=0.01,
+                ),
+                timeout=1,
+            )
+
+            assert source_name_probe_count() == 2
+            assert len(system.discovered_inputs_by_device(HexBytes("00D4"))) == 8
+            assert system.state.inputs[(HexBytes("00D4"), 0x04)].name == "OPT2"
         finally:
             system.shutdown()
             await asyncio.sleep(0)
