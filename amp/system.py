@@ -37,9 +37,6 @@ REMOTE_SOURCE_SELECTOR_MAX = 0x3F
 def _normalize_name(name: str) -> str:
     """Normalize a user-facing name for loose lookup comparisons.
 
-    Args:
-        name: Display name to compare.
-
     Returns:
         Whitespace-free, case-folded name text.
     """
@@ -48,9 +45,6 @@ def _normalize_name(name: str) -> str:
 
 def _guid_candidates(guid: UUID) -> set[UUID]:
     """Build GUID byte-order candidates observed on the wire.
-
-    Args:
-        guid: GUID reported by a device or distributed source row.
 
     Returns:
         Set containing the GUID as reported and its Windows wire-order variant.
@@ -87,9 +81,6 @@ class DeviceState(VersionedState):
 
     def update(self, op: codec.DeviceIdCommand) -> bool:
         """Merge a device-scoped protocol response into this device.
-
-        Args:
-            op: Device command response carrying identity, zone, GUID, or MAC data.
 
         Returns:
             True when the command applied and changed state, otherwise False.
@@ -167,9 +158,6 @@ class InputState(VersionedState):
         Args:
             field_name: Attribute being assigned.
             value: Value to assign to the attribute.
-
-        Returns:
-            None.
         """
         if field_name == "name":
             self.assigned_name = value
@@ -191,14 +179,7 @@ class InputState(VersionedState):
 
     @name.setter
     def name(self, value: str | None) -> None:
-        """Set the user-assigned display name for this input.
-
-        Args:
-            value: Assigned name, or None to clear it.
-
-        Returns:
-            None.
-        """
+        """Set the user-assigned display name for this input."""
         self.assigned_name = value
 
     @property
@@ -265,39 +246,18 @@ class InputState(VersionedState):
         return HexBytes(device_id_str), selector
 
     def update(self, op: SourceNameOptionsCommand) -> None:
-        """Merge a source-name response into this input.
-
-        Args:
-            op: Source name/options response for this selector.
-
-        Returns:
-            None.
-        """
+        """Merge a source-name response into this input."""
         if op.name is None:
             return
         self.assigned_name = op.name
         self.hidden_name = op.hidden_name
 
     def apply_hardware_name(self, name: str) -> None:
-        """Apply a model-derived input name.
-
-        Args:
-            name: Hardware catalog name for this input.
-
-        Returns:
-            None.
-        """
+        """Apply a model-derived input name."""
         self.hardware_name = name
 
     def apply_hardware_source(self, source: SourceModelInfo) -> None:
-        """Apply hardware catalog metadata for this input.
-
-        Args:
-            source: Model source metadata describing selector, kind, and physical id.
-
-        Returns:
-            None.
-        """
+        """Apply hardware catalog metadata for this input."""
         self.hardware_name = source.name
         self.hardware_kind = source.kind
         self.hardware_physical_source_id = source.physical_source_id
@@ -317,9 +277,6 @@ class OutputState(VersionedState):
     def normalize_source_selector(source: int) -> int:
         """Strip protocol flags from a source selector.
 
-        Args:
-            source: Raw selector byte from source-selection state.
-
         Returns:
             Logical selector without turn-on or audio-only flags.
         """
@@ -332,9 +289,6 @@ class OutputState(VersionedState):
     def is_remote_source_selector(selector: int) -> bool:
         """Report whether a selector addresses a distributed source slot.
 
-        Args:
-            selector: Logical source selector.
-
         Returns:
             True when the selector falls in the remote source range.
         """
@@ -344,9 +298,6 @@ class OutputState(VersionedState):
     def is_local_source_selector(selector: int) -> bool:
         """Report whether a selector addresses a local input.
 
-        Args:
-            selector: Logical source selector.
-
         Returns:
             True when the selector is below the distributed source range.
         """
@@ -355,9 +306,6 @@ class OutputState(VersionedState):
     @staticmethod
     def detail_for_remote_backing_source(selector: int) -> int:
         """Encode a backing source selector for remote routing detail.
-
-        Args:
-            selector: Local backing source selector.
 
         Returns:
             Detail byte suitable for a remote source-selection command.
@@ -453,14 +401,7 @@ class OutputState(VersionedState):
         return ops
 
     def update(self, op: codec.OutputCommand) -> None:
-        """Merge an output-scoped command or response into this output.
-
-        Args:
-            op: Output command for this output or ALL_OUTPUTS.
-
-        Returns:
-            None.
-        """
+        """Merge an output-scoped command or response into this output."""
         if op.output != self.id and op.output != ALL_OUTPUTS:
             return
         match op:
@@ -495,9 +436,6 @@ class RemoteInput(VersionedState):
     def update(self, op: codec.DistributedSourceDefinitionSlotCommand) -> bool:
         """Merge a distributed source slot response into this remote input.
 
-        Args:
-            op: Slot definition or unused-slot response.
-
         Returns:
             True when the command applied and changed state, otherwise False.
         """
@@ -530,11 +468,7 @@ class RemoteInput(VersionedState):
 
 class SystemState(VersionTrackerMixin):
     def __init__(self) -> None:
-        """Initialize canonical discovered devices, inputs, outputs, and remote inputs.
-
-        Returns:
-            None.
-        """
+        """Initialize canonical discovered devices, inputs, outputs, and remote inputs."""
         super().__init__()
         self.devices = TrackedDict[HexBytes, DeviceState](
             lambda device_id: DeviceState(id=device_id), tracker=self
@@ -584,9 +518,6 @@ class SystemState(VersionTrackerMixin):
     def from_json(cls, data: dict[str, Any]) -> "SystemState":
         """Load canonical system state from decoded JSON data.
 
-        Args:
-            data: JSON-compatible state dictionary.
-
         Returns:
             Populated SystemState with hardware defaults applied.
         """
@@ -611,23 +542,13 @@ class SystemState(VersionTrackerMixin):
         return state
 
     async def save_to_file(self, file_path: str) -> None:
-        """Write this state to a JSON file.
-
-        Args:
-            file_path: Destination path for serialized state.
-
-        Returns:
-            None.
-        """
+        """Write this state to a JSON file."""
         payload = json.dumps(self.to_json(), indent=2)
         Path(file_path).write_text(payload, encoding="utf-8")
 
     @classmethod
     async def load_from_file(cls, file_path: str) -> "SystemState":
         """Read system state from a JSON file.
-
-        Args:
-            file_path: Source path containing serialized state.
 
         Returns:
             Populated SystemState loaded from the file.
@@ -637,14 +558,7 @@ class SystemState(VersionTrackerMixin):
         return cls.from_json(data)
 
     def merge(self, other: "SystemState") -> None:
-        """Merge another state snapshot into this one.
-
-        Args:
-            other: State snapshot whose canonical entries should be merged.
-
-        Returns:
-            None.
-        """
+        """Merge another state snapshot into this one."""
         for device_id, other_device in other.devices.items():
             self.devices[device_id].merge(other_device)
         for input_key, other_input in other.inputs.items():
@@ -655,11 +569,7 @@ class SystemState(VersionTrackerMixin):
             self.remote_inputs[remote_input_id].merge(other_remote_input)
 
     def apply_hardware_defaults(self) -> None:
-        """Apply model catalog defaults to devices and local inputs.
-
-        Returns:
-            None.
-        """
+        """Apply model catalog defaults to devices and local inputs."""
         for device in self.devices.values():
             device.apply_hardware_defaults()
             if device.model_id is None:
@@ -673,9 +583,6 @@ class SystemState(VersionTrackerMixin):
     def device_for_output(self, output_id: int) -> DeviceState | None:
         """Find the canonical device that owns an output id.
 
-        Args:
-            output_id: Zone/output id to resolve.
-
         Returns:
             Matching device state, or None when unknown.
         """
@@ -686,9 +593,6 @@ class SystemState(VersionTrackerMixin):
 
     def device_for_guid(self, guid: UUID | None) -> DeviceState | None:
         """Find a device by GUID, accounting for observed byte-order variants.
-
-        Args:
-            guid: Device GUID to resolve, or None.
 
         Returns:
             Matching device state, or None when no GUID is available or matched.
@@ -805,9 +709,6 @@ class System(VersionTrackerMixin):
             connection_timeout_secs: Connect timeout for host-based transports.
             trace: Whether host-based transports should trace protocol traffic.
             read_only: Whether host-based transports should reject write commands.
-
-        Returns:
-            None.
         """
         super().__init__()
         self.transports = _normalize_transport_argument(
@@ -831,33 +732,18 @@ class System(VersionTrackerMixin):
         ]
 
     def shutdown(self) -> None:
-        """Synchronously cancel event tasks and shut down all transports.
-
-        Returns:
-            None.
-        """
+        """Synchronously cancel event tasks and shut down all transports."""
         for task in self.tasks:
             task.cancel()
         for transport in self.transports:
             transport.shutdown()
 
     async def _close_transport(self, transport: BaseTransport[Command]) -> None:
-        """Close a single transport asynchronously.
-
-        Args:
-            transport: Transport to close.
-
-        Returns:
-            None.
-        """
+        """Close a single transport asynchronously."""
         await transport.aclose()
 
     async def aclose(self) -> None:
-        """Cancel event tasks and asynchronously close all transports.
-
-        Returns:
-            None.
-        """
+        """Cancel event tasks and asynchronously close all transports."""
         tasks = tuple(self.tasks)
         for task in tasks:
             task.cancel()
@@ -888,9 +774,6 @@ class System(VersionTrackerMixin):
             exc_type: Exception type raised inside the context, if any.
             exc_val: Exception value raised inside the context, if any.
             exc_tb: Exception traceback raised inside the context, if any.
-
-        Returns:
-            None.
         """
         self.shutdown()
 
@@ -909,18 +792,11 @@ class System(VersionTrackerMixin):
             exc_type: Exception type raised inside the context, if any.
             exc_val: Exception value raised inside the context, if any.
             exc_tb: Exception traceback raised inside the context, if any.
-
-        Returns:
-            None.
         """
         await self.aclose()
 
     def dump(self) -> None:
-        """Print a human-readable snapshot of canonical system state.
-
-        Returns:
-            None.
-        """
+        """Print a human-readable snapshot of canonical system state."""
         print(f"Devices ({len(self.state.devices)}):")
         for device in self.state.devices.values():
             print(f"  {device}")
@@ -938,9 +814,6 @@ class System(VersionTrackerMixin):
 
     def device_for_output(self, output_id: int) -> DeviceState | None:
         """Find the canonical device that owns an output id.
-
-        Args:
-            output_id: Zone/output id to resolve.
 
         Returns:
             Matching device state, or None when unknown.
@@ -990,9 +863,6 @@ class System(VersionTrackerMixin):
     def _input_sort_key(self, input_state: InputState) -> tuple[int, int]:
         """Build the physical-order sort key for an input.
 
-        Args:
-            input_state: Input to order.
-
         Returns:
             Tuple ordering physical inputs before selector-only inputs.
         """
@@ -1029,18 +899,11 @@ class System(VersionTrackerMixin):
         )
 
     def apply_hardware_defaults(self) -> None:
-        """Apply model catalog defaults to canonical system state.
-
-        Returns:
-            None.
-        """
+        """Apply model catalog defaults to canonical system state."""
         self.state.apply_hardware_defaults()
 
     def output_remote_source(self, output: OutputState) -> RemoteInput | None:
         """Resolve an output's active remote source selector to remote slot state.
-
-        Args:
-            output: Output state whose reported source should be interpreted.
 
         Returns:
             Active remote input state, or None when no present remote source is active.
@@ -1228,9 +1091,6 @@ class System(VersionTrackerMixin):
     def transport_for_device(self, device: DeviceState) -> BaseTransport[Command] | None:
         """Find the transport associated with a discovered device.
 
-        Args:
-            device: Device state whose host mapping should be resolved.
-
         Returns:
             Matching transport, or None when host information is unavailable.
         """
@@ -1243,9 +1103,6 @@ class System(VersionTrackerMixin):
     ) -> BaseTransport[Command] | None:
         """Find the transport associated with a device id.
 
-        Args:
-            device_id: Device id to resolve.
-
         Returns:
             Matching transport, or None when the device or host mapping is unknown.
         """
@@ -1256,9 +1113,6 @@ class System(VersionTrackerMixin):
 
     def transport_for_output(self, output_id: int) -> BaseTransport[Command]:
         """Select the preferred transport for an output command.
-
-        Args:
-            output_id: Target output id.
 
         Returns:
             Device-local transport when known, otherwise the primary transport.
@@ -1272,9 +1126,6 @@ class System(VersionTrackerMixin):
         self, op: Command
     ) -> tuple[BaseTransport[Command], ...]:
         """Determine which transports should receive a command.
-
-        Args:
-            op: Command to route.
 
         Returns:
             Transports that should receive the command.
@@ -1303,9 +1154,6 @@ class System(VersionTrackerMixin):
     ) -> tuple[OutputState, ...]:
         """Resolve concrete outputs affected by an ALL_OUTPUTS event.
 
-        Args:
-            transport: Transport that emitted the event, if known.
-
         Returns:
             Outputs local to the emitting transport when resolvable, otherwise all outputs.
         """
@@ -1328,9 +1176,6 @@ class System(VersionTrackerMixin):
         Args:
             *ops: Commands to send.
             transport: Optional transport filter/target.
-
-        Returns:
-            None.
         """
         if transport is not None:
             routed_ops = [op for op in ops if transport in self._target_transports_for_op(op)]
@@ -1346,11 +1191,7 @@ class System(VersionTrackerMixin):
             target_transport.send(*transport_ops)
 
     def _apply_pending_device_host_info(self) -> None:
-        """Retry host-identity rows that could not yet be matched to devices.
-
-        Returns:
-            None.
-        """
+        """Retry host-identity rows that could not yet be matched to devices."""
         pending = self._pending_device_host_info
         self._pending_device_host_info = []
         for op in pending:
@@ -1359,9 +1200,6 @@ class System(VersionTrackerMixin):
 
     def _apply_device_host_info(self, op: codec.UndocumentedHostIdentityCommandResponse) -> bool:
         """Apply an undocumented host identity response to matching devices.
-
-        Args:
-            op: Host identity response carrying MAC and candidate GUID data.
 
         Returns:
             True when at least one device matched the response.
@@ -1390,9 +1228,6 @@ class System(VersionTrackerMixin):
         Args:
             device: Device state to update.
             transport: Transport that produced related device data, if known.
-
-        Returns:
-            None.
         """
         if transport is not None and device.host is None:
             device.host = transport.host
@@ -1402,9 +1237,6 @@ class System(VersionTrackerMixin):
         transport: BaseTransport[Command],
     ) -> tuple[DeviceState, ...]:
         """Resolve devices likely associated with a transport-originated event.
-
-        Args:
-            transport: Transport that emitted an event.
 
         Returns:
             Devices assigned to the transport, or a single inferred unhosted device.
@@ -1466,9 +1298,6 @@ class System(VersionTrackerMixin):
         Args:
             op: Decoded protocol command/event or connection-interruption marker.
             transport: Transport that emitted the event, if known.
-
-        Returns:
-            None.
         """
         match op:
             case ConnectionInterrupted():
@@ -1516,14 +1345,7 @@ class System(VersionTrackerMixin):
                     output.update(op)
 
     async def _handle_events(self, transport: BaseTransport[Command]) -> None:
-        """Consume transport events and apply them to system state.
-
-        Args:
-            transport: Transport whose receive stream should be handled.
-
-        Returns:
-            None.
-        """
+        """Consume transport events and apply them to system state."""
         async for op in transport.recv():
             self.update(op, transport=transport)
 
@@ -1538,9 +1360,6 @@ class System(VersionTrackerMixin):
         Args:
             include_names: Whether zone names should also be requested.
             transport: Optional transport to target or filter the requests.
-
-        Returns:
-            None.
         """
         self.send_ops(
             codec.StandbyPowerCommand(output=ALL_OUTPUTS),
@@ -1558,9 +1377,6 @@ class System(VersionTrackerMixin):
 
         Args:
             transport: Optional transport to target or filter the requests.
-
-        Returns:
-            None.
         """
         for device in self.state.devices.values():
             self.send_ops(*device.needed_update_ops(), transport=transport)
@@ -1581,9 +1397,6 @@ class System(VersionTrackerMixin):
         Args:
             target_devices: Expected number of devices before discovery can settle.
             time_between_probes_secs: Delay or wait timeout between probe rounds.
-
-        Returns:
-            None.
         """
         def determine_delta() -> tuple[list[DeviceState], set[codec.Command], set[codec.Command]]:
             """Find incomplete device fields and commands for the next probe round.
@@ -1601,9 +1414,6 @@ class System(VersionTrackerMixin):
                 Args:
                     device: Device missing state.
                     op: Command that can read the missing state.
-
-                Returns:
-                    None.
                 """
                 incomplete_devices.append(device)
                 probe_ops.add(op)
@@ -1683,9 +1493,6 @@ class System(VersionTrackerMixin):
             time_between_probes_secs: Delay or wait timeout between probe rounds.
             time_to_wait_for_devices_with_unknown_inputs: Maximum wait before inferring
                 input count from discovered input names.
-
-        Returns:
-            None.
         """
         devices_with_outputs = [device for device in self.state.devices.values() if device.outputs]
 
@@ -1695,9 +1502,6 @@ class System(VersionTrackerMixin):
         def unknown_input_count_deadline(device: DeviceState) -> float | None:
             """Return the input-count inference deadline for a device.
 
-            Args:
-                device: Device whose input count is still being discovered.
-
             Returns:
                 Event-loop timestamp deadline, or None when no deadline is active.
             """
@@ -1706,14 +1510,7 @@ class System(VersionTrackerMixin):
             return unknown_input_count_deadlines.get(device.id)
 
         def infer_unknown_input_count_after_deadline(device: DeviceState) -> None:
-            """Infer an unknown input count once the device deadline has elapsed.
-
-            Args:
-                device: Device whose input count may be inferred.
-
-            Returns:
-                None.
-            """
+            """Infer an unknown input count once the device deadline has elapsed."""
             if device.input_count is not None:
                 return
             deadline = unknown_input_count_deadline(device)
@@ -1810,9 +1607,6 @@ class System(VersionTrackerMixin):
         Args:
             slot_ids: Remote input slot ids to probe, or None for the default slot range.
             time_between_probes_secs: Delay or wait timeout between probe rounds.
-
-        Returns:
-            None.
         """
         slot_ids = REMOTE_INPUT_SLOT_IDS if slot_ids is None else tuple(slot_ids)
         for slot_id in slot_ids:
@@ -1844,9 +1638,6 @@ class System(VersionTrackerMixin):
 
         Args:
             time_between_probes_secs: Delay or wait timeout between probe rounds.
-
-        Returns:
-            None.
         """
         for device in self.state.devices.values():
             for output_id in device.outputs or ():
@@ -1894,9 +1685,6 @@ class System(VersionTrackerMixin):
             time_between_probes_secs: Delay or wait timeout between probe rounds.
             time_to_wait_for_devices_with_unknown_inputs: Maximum wait before inferring
                 input count from discovered input names.
-
-        Returns:
-            None.
         """
         await self.discover_devices(
             target_devices=target_devices,
@@ -1916,9 +1704,6 @@ class System(VersionTrackerMixin):
     def device_by_id(self, device_id: HexBytes) -> "DeviceSelector":
         """Create a selector for a known device id.
 
-        Args:
-            device_id: Device id to wrap.
-
         Returns:
             DeviceSelector for the canonical device.
         """
@@ -1926,9 +1711,6 @@ class System(VersionTrackerMixin):
 
     def output(self, output_id: int) -> "OutputSelector":
         """Create a selector for a fully discovered output.
-
-        Args:
-            output_id: Output id to wrap.
 
         Returns:
             OutputSelector for the canonical output.
@@ -2064,9 +1846,6 @@ class Selector:
     def _format_value(cls, value: object) -> str:
         """Format a property value for selector string output.
 
-        Args:
-            value: Property value to format.
-
         Returns:
             Human-readable string representation.
         """
@@ -2098,9 +1877,6 @@ class Selector:
     @staticmethod
     def _format_unavailable_property(exc: Exception) -> str:
         """Format an unavailable property exception for selector output.
-
-        Args:
-            exc: Exception raised while reading a property.
 
         Returns:
             Placeholder string explaining the unavailable value.
@@ -2164,9 +1940,6 @@ class DeviceSelector(Selector):
         Args:
             system: System that owns the canonical state.
             device_id: Device id to select.
-
-        Returns:
-            None.
         """
         self.system = system
         device = self.system.state.devices.get(device_id)
@@ -2266,9 +2039,6 @@ class RemoteSourceSelector(Selector):
         Args:
             system: System that owns the canonical state.
             remote_source_id: Zero-based distributed source slot id.
-
-        Returns:
-            None.
         """
         self.system = system
         remote_source = self.system.state.remote_inputs.get(remote_source_id)
@@ -2388,9 +2158,6 @@ class OutputSelector(Selector):
         Args:
             system: System that owns the canonical state.
             output_id: Concrete output id or ALL_OUTPUTS.
-
-        Returns:
-            None.
         """
         self.system = system
         self.output_id = output_id
@@ -2457,14 +2224,7 @@ class OutputSelector(Selector):
         return tuple(self.system.state.outputs.keys())
 
     def _send_output_ops(self, ops: Iterable[codec.OutputCommand]) -> None:
-        """Send output commands when the generated command set is not empty.
-
-        Args:
-            ops: Output commands to send.
-
-        Returns:
-            None.
-        """
+        """Send output commands when the generated command set is not empty."""
         ops = tuple(ops)
         if ops:
             self.system.send_ops(*ops)
@@ -2549,9 +2309,6 @@ class OutputSelector(Selector):
     def _remote_source_for_output(self, output: OutputState) -> RemoteSourceSelector | None:
         """Resolve an output's remote source to a selector.
 
-        Args:
-            output: Output state to inspect.
-
         Returns:
             RemoteSourceSelector for the active remote source, or None.
         """
@@ -2562,9 +2319,6 @@ class OutputSelector(Selector):
 
     def _local_source_selector_for_output(self, output: OutputState) -> int | None:
         """Infer the active local source selector for an output.
-
-        Args:
-            output: Output state to inspect.
 
         Returns:
             Local selector reported by the output or inferred from a same-device remote source.
@@ -2589,9 +2343,6 @@ class OutputSelector(Selector):
     def _active_sources_for_output(self, output: OutputState) -> tuple[int, ...]:
         """Return all interpreted active source selectors for an output.
 
-        Args:
-            output: Output state to inspect.
-
         Returns:
             Ordered, de-duplicated selectors including inferred local and reported sources.
         """
@@ -2608,9 +2359,6 @@ class OutputSelector(Selector):
 
     def _selected_source_for_output(self, output: OutputState) -> int | None:
         """Return the preferred active source selector for an output.
-
-        Args:
-            output: Output state to inspect.
 
         Returns:
             First interpreted active selector, or None when no source is known.
@@ -2808,9 +2556,6 @@ class OutputSelector(Selector):
 
         Args:
             on: True to power on, False to power off.
-
-        Returns:
-            None.
         """
         self._send_output_ops(
             codec.StandbyPowerCommand(
@@ -2821,11 +2566,7 @@ class OutputSelector(Selector):
         )
 
     def disable(self) -> None:
-        """Power off the selected output or outputs.
-
-        Returns:
-            None.
-        """
+        """Power off the selected output or outputs."""
         self.enable(on=False)
 
     def mute(self, muted: bool = True) -> None:
@@ -2833,9 +2574,6 @@ class OutputSelector(Selector):
 
         Args:
             muted: True to mute, False to unmute.
-
-        Returns:
-            None.
         """
         self._send_output_ops(
             codec.MuteCommand(
@@ -2846,50 +2584,25 @@ class OutputSelector(Selector):
         )
 
     def unmute(self) -> None:
-        """Unmute the selected output or outputs.
-
-        Returns:
-            None.
-        """
+        """Unmute the selected output or outputs."""
         self.mute(muted=False)
 
     def set_volume(self, volume: float) -> None:
-        """Set output volume.
-
-        Args:
-            volume: Volume value to send to the device.
-
-        Returns:
-            None.
-        """
+        """Set output volume."""
         self._send_output_ops(
             codec.VolumeCommand(output=output_id, volume=volume)
             for output_id in self._target_output_ids()
         )
 
     def set_max_volume(self, max_volume: float) -> None:
-        """Set output maximum volume.
-
-        Args:
-            max_volume: Maximum volume value to send to the device.
-
-        Returns:
-            None.
-        """
+        """Set output maximum volume."""
         self._send_output_ops(
             codec.MaximumVolumeCommand(output=output_id, max_volume=max_volume)
             for output_id in self._target_output_ids()
         )
 
     def set_input(self, input: "InputSelector") -> None:
-        """Route an input to this output or to all known outputs.
-
-        Args:
-            input: InputSelector identifying the desired source.
-
-        Returns:
-            None.
-        """
+        """Route an input to this output or to all known outputs."""
         self._send_output_ops(
             self.system.source_selection_commands_for_input(
                 self.output_id,
@@ -2906,9 +2619,6 @@ class InputSelector(Selector):
             system: System that owns the canonical state.
             device_id: Device id that owns the input.
             selector: Logical source selector.
-
-        Returns:
-            None.
         """
         self.system = system
         input_state = self.system.state.inputs.get((device_id, selector))
