@@ -226,8 +226,13 @@ their command classes carry `COMMAND_STATUS = "obsolete"` and a note.
 ## Source Selectors
 
 Source selector bytes are logical source IDs. They are not physical display
-order, reversed physical indexes, or one-hot masks. Status bytes can set bit 7;
-clear with `7F` before comparing the selector.
+order, reversed physical indexes, or one-hot masks. Source selection status can
+set bit 7 to indicate the zone should turn on. Values `40`-`4F` set bit 6 for
+audio-only local source selection and should be compared as `00`-`0F`.
+Source-selection reports may include a second source byte when the active source
+has both local and distributed IDs. Source-name rows may expose newer eSeries
+selectors outside the original local/distributed ranges, such as casting
+selectors `50`-`52`.
 
 ### M6250 Observed Hardware Sources
 

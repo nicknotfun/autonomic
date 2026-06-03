@@ -1,17 +1,22 @@
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable, Hashable, Iterable
+from collections import defaultdict
+from collections.abc import Callable, Hashable, Iterable
 from pathlib import Path
-from typing import Any, Protocol, TypeAlias, TypeGuard, TypeVar, cast
+from typing import Any, Literal, TypeAlias, TypeVar, cast, overload, override
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
 from amp.codec import ALL_OUTPUTS, Command, SourceNameOptionsCommand
 import amp.codec as codec
-from amp.hardware import model_by_number
+from amp.hardware import SourceModelInfo, model_by_number
 from amp.toggle_bool import ToggleBool
-from amp.transport import ConnectionInterrupted, Transport
+from amp.transport import (
+    DEFAULT_CONNECTION_TIMEOUT_SECS,
+    BaseTransport,
+    ConnectionInterrupted,
+)
 from amp.versioned import (
     TrackedDict,
     VersionTrackerMixin,
@@ -23,10 +28,34 @@ logger = logging.getLogger(__name__)
 
 REMOTE_INPUT_SLOT_IDS = tuple(range(0x20))
 OutputValueT = TypeVar("OutputValueT", bound=Hashable)
+AUDIO_ONLY_SOURCE_FLAG = 0x40
+SOURCE_TURN_ON_FLAG = 0x80
+REMOTE_SOURCE_SELECTOR_MIN = 0x20
+REMOTE_SOURCE_SELECTOR_MAX = 0x3F
 
 
 def _normalize_name(name: str) -> str:
+    """Normalize a user-facing name for loose lookup comparisons.
+
+    Args:
+        name: Display name to compare.
+
+    Returns:
+        Whitespace-free, case-folded name text.
+    """
     return "".join(name.split()).casefold()
+
+
+def _guid_candidates(guid: UUID) -> set[UUID]:
+    """Build GUID byte-order candidates observed on the wire.
+
+    Args:
+        guid: GUID reported by a device or distributed source row.
+
+    Returns:
+        Set containing the GUID as reported and its Windows wire-order variant.
+    """
+    return {guid, UUID(bytes_le=guid.bytes)}
 
 
 class DeviceState(VersionedState):
@@ -41,6 +70,11 @@ class DeviceState(VersionedState):
     guid: UUID | None = None
 
     def apply_hardware_defaults(self) -> bool:
+        """Apply model-derived input and output metadata to this device.
+
+        Returns:
+            True when the device state changed, otherwise False.
+        """
         old_version = self.version
         if self.model_id is not None:
             model = model_by_number(self.model_id)
@@ -52,6 +86,14 @@ class DeviceState(VersionedState):
         return self.version != old_version
 
     def update(self, op: codec.DeviceIdCommand) -> bool:
+        """Merge a device-scoped protocol response into this device.
+
+        Args:
+            op: Device command response carrying identity, zone, GUID, or MAC data.
+
+        Returns:
+            True when the command applied and changed state, otherwise False.
+        """
         if op.device_id != self.id:
             return False
         old_version = self.version
@@ -70,6 +112,11 @@ class DeviceState(VersionedState):
         return self.version != old_version
 
     def needed_update_ops(self) -> list[codec.Command]:
+        """Build read commands needed to complete this device state.
+
+        Returns:
+            Commands for any missing device identity, GUID, or MAC fields.
+        """
         ops: list[codec.Command] = []
         if self.firmware is None or self.model_id is None or self.outputs is None:
             ops.append(codec.RequestDeviceInformationCommand())
@@ -111,8 +158,19 @@ class InputState(VersionedState):
     assigned_name: str | None = None
     hidden_name: str | None = None
     hardware_name: str | None = None
+    hardware_kind: str | None = None
+    hardware_physical_source_id: int | None = None
 
     def __setattr__(self, field_name: str, value: Any) -> None:
+        """Redirect legacy name assignment to the assigned name field.
+
+        Args:
+            field_name: Attribute being assigned.
+            value: Value to assign to the attribute.
+
+        Returns:
+            None.
+        """
         if field_name == "name":
             self.assigned_name = value
             return
@@ -120,6 +178,11 @@ class InputState(VersionedState):
 
     @property
     def name(self) -> str:
+        """Return the best available display name for this input.
+
+        Returns:
+            Assigned name, hardware name, or generated selector label.
+        """
         if self.assigned_name is not None:
             return self.assigned_name
         if self.hardware_name is not None:
@@ -128,24 +191,54 @@ class InputState(VersionedState):
 
     @name.setter
     def name(self, value: str | None) -> None:
+        """Set the user-assigned display name for this input.
+
+        Args:
+            value: Assigned name, or None to clear it.
+
+        Returns:
+            None.
+        """
         self.assigned_name = value
 
     @property
     def name_discovered(self) -> bool:
+        """Report whether a user-facing name was discovered from the device.
+
+        Returns:
+            True when an assigned source name has been read.
+        """
         return self.assigned_name is not None
 
     @property
     def remote(self) -> bool:
-        return self.selector >= 0x20 and self.selector < 0x50
+        """Report whether this input selector is a distributed source selector.
+
+        Returns:
+            True for remote source selectors, otherwise False.
+        """
+        return OutputState.is_remote_source_selector(self.selector)
 
     @property
     def physical_source_id(self) -> int | None:
-        if self.selector >= 0x20:
+        """Translate the logical selector to the documented physical input id.
+
+        Returns:
+            One-based physical source id for local inputs, or None for remote inputs.
+        """
+        if self.remote:
             return None
+        if self.hardware_kind is not None:
+            return self.hardware_physical_source_id
         return PHYSICAL_SOURCE_ID_BY_LOGICAL_SELECTOR.get(self.selector)
 
     @property
     def qualified_name(self) -> str:
+        """Return a stable device-qualified input name.
+
+        Returns:
+            Name in device-id:physical-id form when possible, otherwise device-id:selector.
+        """
         if self.physical_source_id is not None:
             return f"{self.device_id}:{self.physical_source_id}"
         else:
@@ -153,6 +246,14 @@ class InputState(VersionedState):
 
     @classmethod
     def parse_qualified_name(cls, qualified_name: str) -> tuple[HexBytes, int]:
+        """Parse a device-qualified input name into state keys.
+
+        Args:
+            qualified_name: Input name in device-id:physical-id or device-id:selector form.
+
+        Returns:
+            Device id and logical source selector.
+        """
         device_id_str, selector_str = qualified_name.split(":")
         if selector_str.startswith(("0x", "0X")):
             selector = int(selector_str, 0)
@@ -164,13 +265,42 @@ class InputState(VersionedState):
         return HexBytes(device_id_str), selector
 
     def update(self, op: SourceNameOptionsCommand) -> None:
+        """Merge a source-name response into this input.
+
+        Args:
+            op: Source name/options response for this selector.
+
+        Returns:
+            None.
+        """
         if op.name is None:
             return
         self.assigned_name = op.name
         self.hidden_name = op.hidden_name
 
     def apply_hardware_name(self, name: str) -> None:
+        """Apply a model-derived input name.
+
+        Args:
+            name: Hardware catalog name for this input.
+
+        Returns:
+            None.
+        """
         self.hardware_name = name
+
+    def apply_hardware_source(self, source: SourceModelInfo) -> None:
+        """Apply hardware catalog metadata for this input.
+
+        Args:
+            source: Model source metadata describing selector, kind, and physical id.
+
+        Returns:
+            None.
+        """
+        self.hardware_name = source.name
+        self.hardware_kind = source.kind
+        self.hardware_physical_source_id = source.physical_source_id
 
 
 class OutputState(VersionedState):
@@ -178,11 +308,135 @@ class OutputState(VersionedState):
     name: str | None = None
     on: bool | None = None
     muted: bool | None = None
-    source: int | None = None
+    source_raw: int | None = None
+    source_detail: tuple[int, ...] = ()
     volume: float | None = None
     max_volume: float | None = None
 
+    @staticmethod
+    def normalize_source_selector(source: int) -> int:
+        """Strip protocol flags from a source selector.
+
+        Args:
+            source: Raw selector byte from source-selection state.
+
+        Returns:
+            Logical selector without turn-on or audio-only flags.
+        """
+        source_without_turn_on = source & ~SOURCE_TURN_ON_FLAG
+        if 0x40 <= source_without_turn_on <= 0x4F:
+            return source_without_turn_on & ~AUDIO_ONLY_SOURCE_FLAG
+        return source_without_turn_on
+
+    @staticmethod
+    def is_remote_source_selector(selector: int) -> bool:
+        """Report whether a selector addresses a distributed source slot.
+
+        Args:
+            selector: Logical source selector.
+
+        Returns:
+            True when the selector falls in the remote source range.
+        """
+        return REMOTE_SOURCE_SELECTOR_MIN <= selector <= REMOTE_SOURCE_SELECTOR_MAX
+
+    @staticmethod
+    def is_local_source_selector(selector: int) -> bool:
+        """Report whether a selector addresses a local input.
+
+        Args:
+            selector: Logical source selector.
+
+        Returns:
+            True when the selector is below the distributed source range.
+        """
+        return selector < REMOTE_SOURCE_SELECTOR_MIN
+
+    @staticmethod
+    def detail_for_remote_backing_source(selector: int) -> int:
+        """Encode a backing source selector for remote routing detail.
+
+        Args:
+            selector: Local backing source selector.
+
+        Returns:
+            Detail byte suitable for a remote source-selection command.
+        """
+        if 0 <= selector <= 0x0F:
+            return selector | AUDIO_ONLY_SOURCE_FLAG
+        return selector
+
+    @property
+    def reported_sources(self) -> tuple[int, ...]:
+        """Return normalized source selectors reported by output state.
+
+        Returns:
+            Ordered, de-duplicated selectors from source_raw and source_detail.
+        """
+        if self.source_raw is None:
+            return ()
+        selectors = []
+        seen = set()
+        for raw_source in (self.source_raw, *self.source_detail):
+            selector = self.normalize_source_selector(raw_source)
+            if selector not in seen:
+                selectors.append(selector)
+                seen.add(selector)
+        return tuple(selectors)
+
+    @property
+    def remote_source_selector(self) -> int | None:
+        """Return the reported distributed source selector, if any.
+
+        Returns:
+            First remote selector in reported source state, or None.
+        """
+        return next(
+            (
+                source
+                for source in self.reported_sources
+                if self.is_remote_source_selector(source)
+            ),
+            None,
+        )
+
+    @property
+    def local_source_selector(self) -> int | None:
+        """Return the reported local source selector, if any.
+
+        Returns:
+            First local selector in reported source state, or None.
+        """
+        return next(
+            (
+                source
+                for source in self.reported_sources
+                if self.is_local_source_selector(source)
+            ),
+            None,
+        )
+
+    @property
+    def selected_reported_source_selector(self) -> int | None:
+        """Return the preferred reported selector for this output.
+
+        Returns:
+            Local selector when present, otherwise remote selector or first reported selector.
+        """
+        if self.local_source_selector is not None:
+            return self.local_source_selector
+        if self.remote_source_selector is not None:
+            return self.remote_source_selector
+        if self.reported_sources:
+            return self.reported_sources[0]
+        return None
+
     def needed_update_ops(self) -> list[codec.Command]:
+        """Build read commands needed to complete this output state.
+
+        Returns:
+            Commands for missing name, power, mute, source, volume, or max volume.
+        """
         ops: list[codec.Command] = []
         if self.name is None:
             ops.append(codec.ZoneNameRequestCommand(output=self.id))
@@ -190,7 +444,7 @@ class OutputState(VersionedState):
             ops.append(codec.StandbyPowerCommand(output=self.id))
         if self.muted is None:
             ops.append(codec.MuteCommand(output=self.id))
-        if self.source is None:
+        if self.source_raw is None:
             ops.append(codec.SourceSelectionCommand(output=self.id))
         if self.volume is None:
             ops.append(codec.VolumeCommand(output=self.id))
@@ -199,6 +453,14 @@ class OutputState(VersionedState):
         return ops
 
     def update(self, op: codec.OutputCommand) -> None:
+        """Merge an output-scoped command or response into this output.
+
+        Args:
+            op: Output command for this output or ALL_OUTPUTS.
+
+        Returns:
+            None.
+        """
         if op.output != self.id and op.output != ALL_OUTPUTS:
             return
         match op:
@@ -210,7 +472,8 @@ class OutputState(VersionedState):
                     self.muted = op.is_muted.as_bool(self.muted)
             case codec.SourceSelectionCommand():
                 if op.source is not None:
-                    self.source = op.source & 0x7F
+                    self.source_raw = op.source
+                    self.source_detail = op.detail
             case codec.VolumeCommand():
                 if op.volume is not None:
                     self.volume = op.volume
@@ -230,6 +493,14 @@ class RemoteInput(VersionedState):
     name: str | None = None
 
     def update(self, op: codec.DistributedSourceDefinitionSlotCommand) -> bool:
+        """Merge a distributed source slot response into this remote input.
+
+        Args:
+            op: Slot definition or unused-slot response.
+
+        Returns:
+            True when the command applied and changed state, otherwise False.
+        """
         if op.slot_id != self.id:
             return False
         old_version = self.version
@@ -247,6 +518,11 @@ class RemoteInput(VersionedState):
         return self.version != old_version
 
     def needed_update_ops(self) -> list[codec.Command]:
+        """Build read commands needed to determine this remote input slot.
+
+        Returns:
+            Slot-definition request when presence is unknown, otherwise an empty list.
+        """
         if self.present is None:
             return [codec.DistributedSourceDefinitionRequestCommand(slot_id=self.id)]
         return []
@@ -254,6 +530,11 @@ class RemoteInput(VersionedState):
 
 class SystemState(VersionTrackerMixin):
     def __init__(self) -> None:
+        """Initialize canonical discovered devices, inputs, outputs, and remote inputs.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.devices = TrackedDict[HexBytes, DeviceState](
             lambda device_id: DeviceState(id=device_id), tracker=self
@@ -273,16 +554,21 @@ class SystemState(VersionTrackerMixin):
         )
 
     def to_json(self) -> dict[str, Any]:
+        """Serialize system state to a JSON-compatible dictionary.
+
+        Returns:
+            Dictionary containing devices, inputs, outputs, and remote input slots.
+        """
         return {
             "devices": {
                 str(device_id): device.model_dump(mode="json", exclude={"id"})
                 for device_id, device in self.devices.items()
             },
             "inputs": {
-                f"{input.device_id}:0x{input.selector:02X}": input.model_dump(
+                f"{input_state.device_id}:0x{input_state.selector:02X}": input_state.model_dump(
                     mode="json", exclude={"device_id", "selector"}
                 )
-                for input in self.inputs.values()
+                for input_state in self.inputs.values()
             },
             "outputs": {
                 output_id: output.model_dump(mode="json", exclude={"id"})
@@ -296,6 +582,14 @@ class SystemState(VersionTrackerMixin):
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "SystemState":
+        """Load canonical system state from decoded JSON data.
+
+        Args:
+            data: JSON-compatible state dictionary.
+
+        Returns:
+            Populated SystemState with hardware defaults applied.
+        """
         state = cls()
         for device_id_hex, device_data in data.get("devices", {}).items():
             device_id = HexBytes(device_id_hex)
@@ -307,30 +601,50 @@ class SystemState(VersionTrackerMixin):
             )
         for output_id_str, output_data in data.get("outputs", {}).items():
             output_id = int(output_id_str)
-            if isinstance(output_data, dict) and isinstance(output_data.get("source"), str):
-                output_data = {
-                    **output_data,
-                    "source": HexBytes(output_data["source"]).int(),
-                }
             state.outputs[output_id].merge(OutputState(id=output_id, **output_data))
         for remote_input_id_str, remote_input_data in data.get("remote_inputs", {}).items():
             remote_input_id = int(remote_input_id_str)
             state.remote_inputs[remote_input_id].merge(
                 RemoteInput(id=remote_input_id, **remote_input_data)
             )
+        state.apply_hardware_defaults()
         return state
 
     async def save_to_file(self, file_path: str) -> None:
+        """Write this state to a JSON file.
+
+        Args:
+            file_path: Destination path for serialized state.
+
+        Returns:
+            None.
+        """
         payload = json.dumps(self.to_json(), indent=2)
         Path(file_path).write_text(payload, encoding="utf-8")
 
     @classmethod
     async def load_from_file(cls, file_path: str) -> "SystemState":
+        """Read system state from a JSON file.
+
+        Args:
+            file_path: Source path containing serialized state.
+
+        Returns:
+            Populated SystemState loaded from the file.
+        """
         payload = Path(file_path).read_text(encoding="utf-8")
         data = json.loads(payload)
         return cls.from_json(data)
 
     def merge(self, other: "SystemState") -> None:
+        """Merge another state snapshot into this one.
+
+        Args:
+            other: State snapshot whose canonical entries should be merged.
+
+        Returns:
+            None.
+        """
         for device_id, other_device in other.devices.items():
             self.devices[device_id].merge(other_device)
         for input_key, other_input in other.inputs.items():
@@ -340,20 +654,82 @@ class SystemState(VersionTrackerMixin):
         for remote_input_id, other_remote_input in other.remote_inputs.items():
             self.remote_inputs[remote_input_id].merge(other_remote_input)
 
+    def apply_hardware_defaults(self) -> None:
+        """Apply model catalog defaults to devices and local inputs.
 
-TransportArgument: TypeAlias = Transport[Command] | Iterable[Transport[Command]] | str | Iterable[str]
+        Returns:
+            None.
+        """
+        for device in self.devices.values():
+            device.apply_hardware_defaults()
+            if device.model_id is None:
+                continue
+            model = model_by_number(device.model_id)
+            if model is None:
+                continue
+            for source in model.sources:
+                self.inputs[(device.id, source.selector)].apply_hardware_source(source)
+
+    def device_for_output(self, output_id: int) -> DeviceState | None:
+        """Find the canonical device that owns an output id.
+
+        Args:
+            output_id: Zone/output id to resolve.
+
+        Returns:
+            Matching device state, or None when unknown.
+        """
+        for device in self.devices.values():
+            if device.outputs is not None and output_id in device.outputs:
+                return device
+        return None
+
+    def device_for_guid(self, guid: UUID | None) -> DeviceState | None:
+        """Find a device by GUID, accounting for observed byte-order variants.
+
+        Args:
+            guid: Device GUID to resolve, or None.
+
+        Returns:
+            Matching device state, or None when no GUID is available or matched.
+        """
+        if guid is None:
+            return None
+        candidate_guids = _guid_candidates(guid)
+        for device in self.devices.values():
+            if device.guid in candidate_guids:
+                return device
+        return None
+
+    def selector_for_remote_input(
+        self,
+        backing_device: DeviceState | None,
+        remote_input: RemoteInput,
+    ) -> int | None:
+        """Map a remote input slot's backing source to a local logical selector.
+
+        Args:
+            backing_device: Device that owns the backing source, if known.
+            remote_input: Remote input slot state to interpret.
+
+        Returns:
+            Local logical source selector, or None when the backing source is unknown.
+        """
+        if remote_input.source_index is None:
+            return None
+        physical_source_id = remote_input.source_index + 1
+        if backing_device is not None and backing_device.model_id is not None:
+            model = model_by_number(backing_device.model_id)
+            if model is not None:
+                for source in model.sources:
+                    if source.physical_source_id == physical_source_id:
+                        return source.selector
+        return LOGICAL_SELECTOR_BY_PHYSICAL_SOURCE_ID.get(physical_source_id)
 
 
-class _AsyncCloseable(Protocol):
-    def aclose(self) -> Awaitable[None]: ...
-
-
-def _is_transport(value: object) -> TypeGuard[Transport[Command]]:
-    return hasattr(value, "send") and hasattr(value, "recv") and hasattr(value, "shutdown")
-
-
-def _is_async_closeable(value: object) -> TypeGuard[_AsyncCloseable]:
-    return callable(getattr(value, "aclose", None))
+TransportArgument: TypeAlias = (
+    BaseTransport[Command] | Iterable[BaseTransport[Command]] | str | Iterable[str]
+)
 
 
 def _normalize_transport_argument(
@@ -364,7 +740,20 @@ def _normalize_transport_argument(
     connection_timeout_secs: float,
     trace: bool,
     read_only: bool,
-) -> tuple[Transport[Command], ...]:
+) -> tuple[BaseTransport[Command], ...]:
+    """Normalize hosts and transports into concrete transport instances.
+
+    Args:
+        transport_arg: Host, transport, or iterable of hosts/transports.
+        port: TCP port used when constructing transports from hosts.
+        reconnection_wait_secs: Delay between reconnect attempts for new transports.
+        connection_timeout_secs: Connect timeout for new transports.
+        trace: Whether constructed transports should trace protocol traffic.
+        read_only: Whether constructed transports should block write commands.
+
+    Returns:
+        Tuple of transport instances.
+    """
     if isinstance(transport_arg, str):
         return (
             codec.connect(
@@ -376,10 +765,10 @@ def _normalize_transport_argument(
                 read_only=read_only,
             ),
         )
-    elif _is_transport(transport_arg):
+    elif isinstance(transport_arg, BaseTransport):
         return (transport_arg,)
     else:
-        transports: list[Transport[Command]] = []
+        transports: list[BaseTransport[Command]] = []
         for item in cast(Iterable[TransportArgument], transport_arg):
             transports.extend(
                 _normalize_transport_argument(
@@ -402,10 +791,24 @@ class System(VersionTrackerMixin):
         *,
         port: int = 17037,
         reconnection_wait_secs: float = 5.0,
-        connection_timeout_secs: float = 10.0,
+        connection_timeout_secs: float = DEFAULT_CONNECTION_TIMEOUT_SECS,
         trace: bool = False,
         read_only: bool = True,
     ) -> None:
+        """Create a system controller around one or more transports.
+
+        Args:
+            transport: Host, transport instance, or iterable of hosts/transports.
+            state: Existing canonical state to use, or None for a new state.
+            port: TCP port used for host-based transports.
+            reconnection_wait_secs: Delay between reconnect attempts.
+            connection_timeout_secs: Connect timeout for host-based transports.
+            trace: Whether host-based transports should trace protocol traffic.
+            read_only: Whether host-based transports should reject write commands.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.transports = _normalize_transport_argument(
             transport,
@@ -428,18 +831,33 @@ class System(VersionTrackerMixin):
         ]
 
     def shutdown(self) -> None:
+        """Synchronously cancel event tasks and shut down all transports.
+
+        Returns:
+            None.
+        """
         for task in self.tasks:
             task.cancel()
         for transport in self.transports:
             transport.shutdown()
 
-    async def _close_transport(self, transport: Transport[Command]) -> None:
-        if _is_async_closeable(transport):
-            await transport.aclose()
-        else:
-            transport.shutdown()
+    async def _close_transport(self, transport: BaseTransport[Command]) -> None:
+        """Close a single transport asynchronously.
+
+        Args:
+            transport: Transport to close.
+
+        Returns:
+            None.
+        """
+        await transport.aclose()
 
     async def aclose(self) -> None:
+        """Cancel event tasks and asynchronously close all transports.
+
+        Returns:
+            None.
+        """
         tasks = tuple(self.tasks)
         for task in tasks:
             task.cancel()
@@ -456,27 +874,60 @@ class System(VersionTrackerMixin):
                 raise result
 
     def __enter__(self) -> "System":
+        """Enter a synchronous context manager.
+
+        Returns:
+            This System instance.
+        """
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit a synchronous context manager by shutting down transports.
+
+        Args:
+            exc_type: Exception type raised inside the context, if any.
+            exc_val: Exception value raised inside the context, if any.
+            exc_tb: Exception traceback raised inside the context, if any.
+
+        Returns:
+            None.
+        """
         self.shutdown()
 
     async def __aenter__(self) -> "System":
+        """Enter an asynchronous context manager.
+
+        Returns:
+            This System instance.
+        """
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit an asynchronous context manager by closing transports.
+
+        Args:
+            exc_type: Exception type raised inside the context, if any.
+            exc_val: Exception value raised inside the context, if any.
+            exc_tb: Exception traceback raised inside the context, if any.
+
+        Returns:
+            None.
+        """
         await self.aclose()
 
     def dump(self) -> None:
+        """Print a human-readable snapshot of canonical system state.
+
+        Returns:
+            None.
+        """
         print(f"Devices ({len(self.state.devices)}):")
         for device in self.state.devices.values():
             print(f"  {device}")
-        print(f"Inputs ({len(self.state.inputs)}):")
-        for (device_id, selector), input in sorted(
-            self.state.inputs.items(),
-            key=lambda item: item[1].qualified_name,
-        ):
-            print(f"  {input.qualified_name}: {input}")
+        inputs = list(self._listed_inputs())
+        print(f"Inputs ({len(inputs)}):")
+        for input_state in inputs:
+            print(f"  {input_state.qualified_name}: {input_state}")
         print(f"Outputs ({len(self.state.outputs)}):")
         for _, output in self.state.outputs.items():
             print(f"  {output}")
@@ -486,74 +937,348 @@ class System(VersionTrackerMixin):
         print()
 
     def device_for_output(self, output_id: int) -> DeviceState | None:
-        for device in self.state.devices.values():
-            if device.outputs is not None and output_id in device.outputs:
-                return device
-        return None
+        """Find the canonical device that owns an output id.
+
+        Args:
+            output_id: Zone/output id to resolve.
+
+        Returns:
+            Matching device state, or None when unknown.
+        """
+        return self.state.device_for_output(output_id)
 
     def inputs_by_device(
-        self, device_id: HexBytes, include_remote: bool = True
+        self, device_id: HexBytes, include_remote: bool = False
     ) -> list[InputState]:
-        return [
-            input
-            for (input_device_id, _), input in self.state.inputs.items()
-            if input_device_id == device_id and (include_remote or not input.remote)
-        ]
+        """List known inputs for one device.
+
+        Args:
+            device_id: Device id whose inputs should be listed.
+            include_remote: Whether distributed source selectors should be included.
+
+        Returns:
+            Inputs sorted by physical source order, then selector.
+        """
+        return sorted(
+            [
+                input_state
+                for (input_device_id, _), input_state in self.state.inputs.items()
+                if input_device_id == device_id
+                and (include_remote or not input_state.remote)
+            ],
+            key=self._input_sort_key,
+        )
 
     def discovered_inputs_by_device(
-        self, device_id: HexBytes, include_remote: bool = True
+        self, device_id: HexBytes, include_remote: bool = False
     ) -> list[InputState]:
+        """List named inputs discovered for one device.
+
+        Args:
+            device_id: Device id whose discovered inputs should be listed.
+            include_remote: Whether distributed source selectors should be included.
+
+        Returns:
+            Inputs whose source names have been discovered.
+        """
         return [
-            input
-            for input in self.inputs_by_device(device_id, include_remote=include_remote)
-            if input.name_discovered
+            input_state
+            for input_state in self.inputs_by_device(device_id, include_remote=include_remote)
+            if input_state.name_discovered
         ]
 
-    def apply_hardware_defaults(self) -> None:
-        for device in self.state.devices.values():
-            device.apply_hardware_defaults()
-            if device.model_id is None:
-                continue
-            model = model_by_number(device.model_id)
-            if model is None:
-                continue
-            for source in model.sources:
-                self.state.inputs[(device.id, source.selector)].apply_hardware_name(source.name)
+    def _input_sort_key(self, input_state: InputState) -> tuple[int, int]:
+        """Build the physical-order sort key for an input.
 
-    def outputs_by_input(self, source_input: InputState) -> list[OutputState]:
-        outputs = []
-        for output in self.state.outputs.values():
-            if output.source is None:
+        Args:
+            input_state: Input to order.
+
+        Returns:
+            Tuple ordering physical inputs before selector-only inputs.
+        """
+        physical_source_id = input_state.physical_source_id
+        if physical_source_id is not None:
+            return physical_source_id, input_state.selector
+        return 0x100 + input_state.selector, input_state.selector
+
+    def _listed_inputs(self) -> tuple[InputState, ...]:
+        """Build the public input listing without duplicate remote mappings.
+
+        Returns:
+            Local physical inputs plus orphan local inputs, sorted for presentation.
+        """
+        inputs: list[InputState] = []
+        for device in self.state.devices.values():
+            inputs.extend(self.inputs_by_device(device.id))
+
+        listed_keys = {(input_state.device_id, input_state.selector) for input_state in inputs}
+        for input_state in self.state.inputs.values():
+            key = (input_state.device_id, input_state.selector)
+            if input_state.remote or key in listed_keys:
                 continue
-            if output.source != source_input.selector:
-                continue
-            output_device = self.device_for_output(output.id)
-            if output_device is not None and output_device.id != source_input.device_id:
-                continue
-            outputs.append(output)
-        return outputs
+            inputs.append(input_state)
+
+        return tuple(
+            sorted(
+                inputs,
+                key=lambda input_state: (
+                    str(input_state.device_id),
+                    *self._input_sort_key(input_state),
+                ),
+            )
+        )
+
+    def apply_hardware_defaults(self) -> None:
+        """Apply model catalog defaults to canonical system state.
+
+        Returns:
+            None.
+        """
+        self.state.apply_hardware_defaults()
+
+    def output_remote_source(self, output: OutputState) -> RemoteInput | None:
+        """Resolve an output's active remote source selector to remote slot state.
+
+        Args:
+            output: Output state whose reported source should be interpreted.
+
+        Returns:
+            Active remote input state, or None when no present remote source is active.
+        """
+        remote_source_selector = output.remote_source_selector
+        if remote_source_selector is None:
+            return None
+        remote_slot_id = remote_source_selector - REMOTE_SOURCE_SELECTOR_MIN
+        remote_input = self.state.remote_inputs.get(remote_slot_id)
+        if remote_input is None or not remote_input.present:
+            return None
+        return remote_input
+
+    def source_selection_command_for_input(
+        self,
+        output_id: int,
+        source_input: InputState,
+    ) -> codec.SourceSelectionCommand:
+        """Build the best source-selection command for one output/input pair.
+
+        Args:
+            output_id: Target output id.
+            source_input: Desired input state, local or remote.
+
+        Returns:
+            Source selection command encoded for the target output's device.
+        """
+        if output_id not in self.state.outputs:
+            raise ValueError(f"Output {output_id} not found")
+        target_device = self.device_for_output(output_id)
+        if target_device is None:
+            raise ValueError(f"Cannot find target device for output {output_id}")
+
+        if source_input.remote:
+            return self._source_selection_command_for_remote_input(
+                output_id,
+                target_device,
+                source_input,
+            )
+
+        if target_device.id == source_input.device_id:
+            return codec.SourceSelectionCommand(output=output_id, source=source_input.selector)
+
+        remote_selector = self._remote_selector_for_input(
+            output_id,
+            target_device,
+            source_input,
+        )
+        return codec.SourceSelectionCommand(
+            output=output_id,
+            source=remote_selector,
+            detail=(OutputState.detail_for_remote_backing_source(source_input.selector),),
+        )
+
+    def source_selection_commands_for_input(
+        self,
+        output_id: int,
+        source_input: InputState,
+    ) -> tuple[codec.SourceSelectionCommand, ...]:
+        """Build source-selection commands for one output or all known outputs.
+
+        Args:
+            output_id: Target output id, or ALL_OUTPUTS for every canonical output.
+            source_input: Desired input state, local or remote.
+
+        Returns:
+            One command per concrete output that should be set.
+        """
+        if output_id != ALL_OUTPUTS:
+            return (self.source_selection_command_for_input(output_id, source_input),)
+
+        output_ids = tuple(self.state.outputs.keys())
+        if not output_ids:
+            raise ValueError(
+                f"Cannot set input {source_input.qualified_name} for ALL_OUTPUTS without known outputs"
+            )
+        return tuple(
+            self.source_selection_command_for_input(target_output_id, source_input)
+            for target_output_id in output_ids
+        )
+
+    def _source_selection_command_for_remote_input(
+        self,
+        output_id: int,
+        target_device: DeviceState,
+        source_input: InputState,
+    ) -> codec.SourceSelectionCommand:
+        """Build a source-selection command for an already-remote input selector.
+
+        Args:
+            output_id: Target output id.
+            target_device: Device that owns the target output.
+            source_input: Remote input selector state.
+
+        Returns:
+            Local-source command when the target device owns the backing source,
+            otherwise remote-source command with backing detail.
+        """
+        remote_slot_id = source_input.selector - REMOTE_SOURCE_SELECTOR_MIN
+        remote_input = self.state.remote_inputs.get(remote_slot_id)
+        if remote_input is None or not remote_input.present:
+            raise ValueError(
+                f"Cannot route remote input {source_input.qualified_name} ({source_input.name}) "
+                f"to output {output_id}: distributed source slot {remote_slot_id} is not defined"
+            )
+
+        backing_device = self.state.device_for_guid(remote_input.device_guid)
+        backing_source = self.state.selector_for_remote_input(backing_device, remote_input)
+        if backing_source is None:
+            raise ValueError(
+                f"Cannot route remote input {source_input.qualified_name} ({source_input.name}) "
+                f"to output {output_id}: backing source is unknown"
+            )
+        if backing_device is not None and target_device.id == backing_device.id:
+            return codec.SourceSelectionCommand(output=output_id, source=backing_source)
+
+        return codec.SourceSelectionCommand(
+            output=output_id,
+            source=source_input.selector,
+            detail=(OutputState.detail_for_remote_backing_source(backing_source),),
+        )
+
+    def _remote_selector_for_input(
+        self,
+        output_id: int,
+        target_device: DeviceState,
+        source_input: InputState,
+    ) -> int:
+        """Find the distributed source selector that exposes a local input remotely.
+
+        Args:
+            output_id: Target output id used for error context.
+            target_device: Device that owns the target output.
+            source_input: Local source input to route across devices.
+
+        Returns:
+            Remote source selector for the backing input.
+        """
+        source_device = self.state.devices.get(source_input.device_id)
+        if source_device is None:
+            raise ValueError(
+                f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
+                f"{output_id} on device {target_device.id}: source device is unknown"
+            )
+        if source_device.guid is None:
+            raise ValueError(
+                f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
+                f"{output_id} on device {target_device.id}: source device {source_device.id} "
+                "has no GUID"
+            )
+        physical_source_id = source_input.physical_source_id
+        if physical_source_id is None:
+            raise ValueError(
+                f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
+                f"{output_id} on device {target_device.id}: input has no physical source id"
+            )
+        source_index = physical_source_id - 1
+        source_guids = _guid_candidates(source_device.guid)
+        for remote_slot_id, remote_input in sorted(self.state.remote_inputs.items()):
+            if (
+                remote_input.present
+                and remote_input.source_index == source_index
+                and remote_input.device_guid in source_guids
+            ):
+                return REMOTE_SOURCE_SELECTOR_MIN + remote_slot_id
+
+        raise ValueError(
+            f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
+            f"{output_id} on device {target_device.id}: no distributed source mapping "
+            f"for source device {source_device.id} physical input {physical_source_id}"
+        )
 
     def input_for_device_selector(self, device_id: HexBytes, selector: int) -> InputState | None:
+        """Look up a canonical input by device id and logical selector.
+
+        Args:
+            device_id: Device id that owns the input.
+            selector: Logical source selector.
+
+        Returns:
+            Matching input state, or None when unknown.
+        """
         return self.state.inputs.get((device_id, selector))
 
-    def transport_for_device(self, device: DeviceState) -> Transport[Command] | None:
+    def transport_for_device(self, device: DeviceState) -> BaseTransport[Command] | None:
+        """Find the transport associated with a discovered device.
+
+        Args:
+            device: Device state whose host mapping should be resolved.
+
+        Returns:
+            Matching transport, or None when host information is unavailable.
+        """
         if device.host is None:
             return None
         return self._transports_by_host.get(device.host)
 
-    def transport_for_device_id(self, device_id: HexBytes) -> Transport[Command] | None:
+    def transport_for_device_id(
+        self, device_id: HexBytes
+    ) -> BaseTransport[Command] | None:
+        """Find the transport associated with a device id.
+
+        Args:
+            device_id: Device id to resolve.
+
+        Returns:
+            Matching transport, or None when the device or host mapping is unknown.
+        """
         device = self.state.devices.get(device_id)
         if device is None:
             return None
         return self.transport_for_device(device)
 
-    def transport_for_output(self, output_id: int) -> Transport[Command]:
+    def transport_for_output(self, output_id: int) -> BaseTransport[Command]:
+        """Select the preferred transport for an output command.
+
+        Args:
+            output_id: Target output id.
+
+        Returns:
+            Device-local transport when known, otherwise the primary transport.
+        """
         device = self.device_for_output(output_id)
         if device is None:
             return self.transport
         return self.transport_for_device(device) or self.transport
 
-    def _target_transports_for_op(self, op: Command) -> tuple[Transport[Command], ...]:
+    def _target_transports_for_op(
+        self, op: Command
+    ) -> tuple[BaseTransport[Command], ...]:
+        """Determine which transports should receive a command.
+
+        Args:
+            op: Command to route.
+
+        Returns:
+            Transports that should receive the command.
+        """
         match op:
             case codec.OutputCommand(output=output_id) if output_id == ALL_OUTPUTS:
                 return self.transports
@@ -574,33 +1299,58 @@ class System(VersionTrackerMixin):
 
     def _outputs_for_all_outputs_event(
         self,
-        transport: Transport[Command] | None,
+        transport: BaseTransport[Command] | None,
     ) -> tuple[OutputState, ...]:
+        """Resolve concrete outputs affected by an ALL_OUTPUTS event.
+
+        Args:
+            transport: Transport that emitted the event, if known.
+
+        Returns:
+            Outputs local to the emitting transport when resolvable, otherwise all outputs.
+        """
         if transport is not None:
             devices = self._devices_for_transport_event(transport)
-            output_ids = {
-                output_id
-                for device in devices
-                for output_id in (device.outputs or ())
-            }
-            return tuple(self.state.outputs[output_id] for output_id in sorted(output_ids))
+            device_ids = {device.id for device in devices}
+            return tuple(
+                output
+                for output in self.state.outputs.values()
+                if (device := self.device_for_output(output.id)) is not None
+                and device.id in device_ids
+            )
         return tuple(self.state.outputs.values())
 
-    def send_ops(self, *ops: Command, transport: Transport[Command] | None = None) -> None:
+    def send_ops(
+        self, *ops: Command, transport: BaseTransport[Command] | None = None
+    ) -> None:
+        """Send commands through their appropriate transport or a requested transport.
+
+        Args:
+            *ops: Commands to send.
+            transport: Optional transport filter/target.
+
+        Returns:
+            None.
+        """
         if transport is not None:
             routed_ops = [op for op in ops if transport in self._target_transports_for_op(op)]
             if routed_ops:
                 transport.send(*routed_ops)
             return
 
-        ops_by_transport: dict[Transport[Command], list[Command]] = {}
+        ops_by_transport: defaultdict[BaseTransport[Command], list[Command]] = defaultdict(list)
         for op in ops:
             for target_transport in self._target_transports_for_op(op):
-                ops_by_transport.setdefault(target_transport, []).append(op)
+                ops_by_transport[target_transport].append(op)
         for target_transport, transport_ops in ops_by_transport.items():
             target_transport.send(*transport_ops)
 
     def _apply_pending_device_host_info(self) -> None:
+        """Retry host-identity rows that could not yet be matched to devices.
+
+        Returns:
+            None.
+        """
         pending = self._pending_device_host_info
         self._pending_device_host_info = []
         for op in pending:
@@ -608,6 +1358,14 @@ class System(VersionTrackerMixin):
                 self._pending_device_host_info.append(op)
 
     def _apply_device_host_info(self, op: codec.UndocumentedHostIdentityCommandResponse) -> bool:
+        """Apply an undocumented host identity response to matching devices.
+
+        Args:
+            op: Host identity response carrying MAC and candidate GUID data.
+
+        Returns:
+            True when at least one device matched the response.
+        """
         candidates = set(op.candidate_guids)
         matched = False
         for device in self.state.devices.values():
@@ -625,15 +1383,32 @@ class System(VersionTrackerMixin):
     def _note_device_host(
         self,
         device: DeviceState,
-        transport: Transport[Command] | None,
+        transport: BaseTransport[Command] | None,
     ) -> None:
+        """Record the emitting transport host for a device when not already known.
+
+        Args:
+            device: Device state to update.
+            transport: Transport that produced related device data, if known.
+
+        Returns:
+            None.
+        """
         if transport is not None and device.host is None:
             device.host = transport.host
 
     def _devices_for_transport_event(
         self,
-        transport: Transport[Command],
+        transport: BaseTransport[Command],
     ) -> tuple[DeviceState, ...]:
+        """Resolve devices likely associated with a transport-originated event.
+
+        Args:
+            transport: Transport that emitted an event.
+
+        Returns:
+            Devices assigned to the transport, or a single inferred unhosted device.
+        """
         devices = tuple(
             device for device in self.state.devices.values() if device.host == transport.host
         )
@@ -653,8 +1428,17 @@ class System(VersionTrackerMixin):
     def _devices_for_source_name_event(
         self,
         op: codec.SourceNameOptionsCommand,
-        transport: Transport[Command] | None,
+        transport: BaseTransport[Command] | None,
     ) -> tuple[DeviceState, ...]:
+        """Resolve devices affected by a source-name response.
+
+        Args:
+            op: Source name/options response.
+            transport: Transport that emitted the response, if known.
+
+        Returns:
+            Candidate devices whose input table should receive the response.
+        """
         if op.output != ALL_OUTPUTS:
             device = self.device_for_output(op.output)
             if device is not None:
@@ -675,8 +1459,17 @@ class System(VersionTrackerMixin):
     def update(
         self,
         op: Command | ConnectionInterrupted,
-        transport: Transport[Command] | None = None,
+        transport: BaseTransport[Command] | None = None,
     ) -> None:
+        """Merge an incoming command/event into canonical system state.
+
+        Args:
+            op: Decoded protocol command/event or connection-interruption marker.
+            transport: Transport that emitted the event, if known.
+
+        Returns:
+            None.
+        """
         match op:
             case ConnectionInterrupted():
                 self.refresh(transport=transport)
@@ -714,12 +1507,23 @@ class System(VersionTrackerMixin):
                     for output in self._outputs_for_all_outputs_event(transport):
                         output.update(op)
                 else:
+                    output_device = self.device_for_output(op.output)
+                    if output_device is None:
+                        return
                     if transport is not None:
-                        if output_device := self.device_for_output(op.output):
-                            self._note_device_host(output_device, transport)
-                    self.state.outputs[op.output].update(op)
+                        self._note_device_host(output_device, transport)
+                    output = self.state.outputs[op.output]
+                    output.update(op)
 
-    async def _handle_events(self, transport: Transport[Command]) -> None:
+    async def _handle_events(self, transport: BaseTransport[Command]) -> None:
+        """Consume transport events and apply them to system state.
+
+        Args:
+            transport: Transport whose receive stream should be handled.
+
+        Returns:
+            None.
+        """
         async for op in transport.recv():
             self.update(op, transport=transport)
 
@@ -727,8 +1531,17 @@ class System(VersionTrackerMixin):
         self,
         include_names: bool = False,
         *,
-        transport: Transport[Command] | None = None,
+        transport: BaseTransport[Command] | None = None,
     ) -> None:
+        """Request dynamic output state for all outputs.
+
+        Args:
+            include_names: Whether zone names should also be requested.
+            transport: Optional transport to target or filter the requests.
+
+        Returns:
+            None.
+        """
         self.send_ops(
             codec.StandbyPowerCommand(output=ALL_OUTPUTS),
             codec.MuteCommand(output=ALL_OUTPUTS),
@@ -740,8 +1553,15 @@ class System(VersionTrackerMixin):
         if include_names:
             self.send_ops(codec.ZoneNameRequestCommand(output=ALL_OUTPUTS), transport=transport)
 
-    def refresh(self, *, transport: Transport[Command] | None = None) -> None:
-        """Don't block on configuration, but fill gaps and refresh dynamic output info."""
+    def refresh(self, *, transport: BaseTransport[Command] | None = None) -> None:
+        """Request missing configuration state and current output state.
+
+        Args:
+            transport: Optional transport to target or filter the requests.
+
+        Returns:
+            None.
+        """
         for device in self.state.devices.values():
             self.send_ops(*device.needed_update_ops(), transport=transport)
         for output in self.state.outputs.values():
@@ -756,12 +1576,35 @@ class System(VersionTrackerMixin):
         *,
         time_between_probes_secs: float = 0.5,
     ) -> None:
+        """Discover device identity, output ownership, and host mapping.
+
+        Args:
+            target_devices: Expected number of devices before discovery can settle.
+            time_between_probes_secs: Delay or wait timeout between probe rounds.
+
+        Returns:
+            None.
+        """
         def determine_delta() -> tuple[list[DeviceState], set[codec.Command], set[codec.Command]]:
+            """Find incomplete device fields and commands for the next probe round.
+
+            Returns:
+                Incomplete devices, required probe commands, and best-effort probe commands.
+            """
             incomplete_devices = []
             probe_ops: set[codec.Command] = set()
             best_effort_probe_ops: set[codec.Command] = set()
 
             def mark_incomplete(device: DeviceState, op: codec.Command) -> None:
+                """Record one missing device field and its probe command.
+
+                Args:
+                    device: Device missing state.
+                    op: Command that can read the missing state.
+
+                Returns:
+                    None.
+                """
                 incomplete_devices.append(device)
                 probe_ops.add(op)
 
@@ -775,7 +1618,12 @@ class System(VersionTrackerMixin):
                         )
             return incomplete_devices, probe_ops, best_effort_probe_ops
 
-        def missing_host_transports() -> list[Transport[Command]]:
+        def missing_host_transports() -> list[BaseTransport[Command]]:
+            """Find transports that do not yet have an associated device.
+
+            Returns:
+                Transports whose host has not been matched to discovered devices.
+            """
             if len(self.transports) == 1:
                 return []
             return [
@@ -829,17 +1677,43 @@ class System(VersionTrackerMixin):
         time_between_probes_secs: float = 0.5,
         time_to_wait_for_devices_with_unknown_inputs: float = 2.0,
     ) -> None:
+        """Discover local input names and infer unknown input counts.
+
+        Args:
+            time_between_probes_secs: Delay or wait timeout between probe rounds.
+            time_to_wait_for_devices_with_unknown_inputs: Maximum wait before inferring
+                input count from discovered input names.
+
+        Returns:
+            None.
+        """
         devices_with_outputs = [device for device in self.state.devices.values() if device.outputs]
 
-        probed_outputs_by_device: dict[HexBytes, set[int]] = {}
+        probed_outputs_by_device: defaultdict[HexBytes, set[int]] = defaultdict(set)
         unknown_input_count_deadlines: dict[HexBytes, float] = {}
 
         def unknown_input_count_deadline(device: DeviceState) -> float | None:
+            """Return the input-count inference deadline for a device.
+
+            Args:
+                device: Device whose input count is still being discovered.
+
+            Returns:
+                Event-loop timestamp deadline, or None when no deadline is active.
+            """
             if device.input_count is not None:
                 return None
             return unknown_input_count_deadlines.get(device.id)
 
         def infer_unknown_input_count_after_deadline(device: DeviceState) -> None:
+            """Infer an unknown input count once the device deadline has elapsed.
+
+            Args:
+                device: Device whose input count may be inferred.
+
+            Returns:
+                None.
+            """
             if device.input_count is not None:
                 return
             deadline = unknown_input_count_deadline(device)
@@ -850,6 +1724,11 @@ class System(VersionTrackerMixin):
                 device.input_count = detected_inputs
 
         def determine_probe_ops() -> tuple[list[codec.Command], bool]:
+            """Build source-name probes for the next input discovery round.
+
+            Returns:
+                Probe commands and whether any device still has an unknown input count.
+            """
             probe_ops: list[codec.Command] = []
             any_devices_with_unknown_input_count = False
             for device in devices_with_outputs:
@@ -862,7 +1741,7 @@ class System(VersionTrackerMixin):
                 elif detected_inputs >= device.input_count:
                     continue
 
-                probed_outputs = probed_outputs_by_device.setdefault(device.id, set())
+                probed_outputs = probed_outputs_by_device[device.id]
                 if (
                     device.input_count is not None
                     and detected_inputs < device.input_count
@@ -886,6 +1765,11 @@ class System(VersionTrackerMixin):
             return probe_ops, any_devices_with_unknown_input_count
 
         def input_tables_ready() -> bool:
+            """Report whether all device input tables are complete enough.
+
+            Returns:
+                True when input discovery can stop, otherwise False.
+            """
             for device in devices_with_outputs:
                 infer_unknown_input_count_after_deadline(device)
                 detected_inputs = len(
@@ -921,11 +1805,25 @@ class System(VersionTrackerMixin):
         slot_ids: Iterable[int] | None = None,
         time_between_probes_secs: float = 0.5,
     ) -> None:
+        """Discover distributed source slot definitions.
+
+        Args:
+            slot_ids: Remote input slot ids to probe, or None for the default slot range.
+            time_between_probes_secs: Delay or wait timeout between probe rounds.
+
+        Returns:
+            None.
+        """
         slot_ids = REMOTE_INPUT_SLOT_IDS if slot_ids is None else tuple(slot_ids)
         for slot_id in slot_ids:
             _ = self.state.remote_inputs[slot_id]
 
         def needed_probe_ops() -> list[codec.Command]:
+            """Build remote-input slot requests still needed.
+
+            Returns:
+                Distributed source definition requests for unknown slots.
+            """
             probe_ops: list[codec.Command] = []
             for slot_id in slot_ids:
                 probe_ops.extend(self.state.remote_inputs[slot_id].needed_update_ops())
@@ -942,6 +1840,14 @@ class System(VersionTrackerMixin):
             )
 
     async def discover_outputs(self, *, time_between_probes_secs: float = 0.5) -> None:
+        """Discover output state for all outputs assigned to known devices.
+
+        Args:
+            time_between_probes_secs: Delay or wait timeout between probe rounds.
+
+        Returns:
+            None.
+        """
         for device in self.state.devices.values():
             for output_id in device.outputs or ():
                 _ = self.state.outputs[
@@ -951,6 +1857,11 @@ class System(VersionTrackerMixin):
         self.refresh_outputs(include_names=True)
 
         def needed_probe_ops() -> set[codec.Command]:
+            """Build output-state requests still needed.
+
+            Returns:
+                Set of commands needed to complete known output state.
+            """
             probe_ops: set[codec.Command] = set()
             for output in self.state.outputs.values():
                 probe_ops.update(output.needed_update_ops())
@@ -976,6 +1887,17 @@ class System(VersionTrackerMixin):
         time_between_probes_secs: float = 0.5,
         time_to_wait_for_devices_with_unknown_inputs: float = 2.0,
     ) -> None:
+        """Run full device, input, output, and remote-input discovery.
+
+        Args:
+            target_devices: Expected number of devices before device discovery can settle.
+            time_between_probes_secs: Delay or wait timeout between probe rounds.
+            time_to_wait_for_devices_with_unknown_inputs: Maximum wait before inferring
+                input count from discovered input names.
+
+        Returns:
+            None.
+        """
         await self.discover_devices(
             target_devices=target_devices,
             time_between_probes_secs=time_between_probes_secs,
@@ -991,20 +1913,26 @@ class System(VersionTrackerMixin):
             self.discover_remote_inputs(time_between_probes_secs=time_between_probes_secs),
         )
 
-    def device(self, device_id: HexBytes) -> "DeviceSelector":
-        device = self.state.devices.get(device_id)
-        if device is None:
-            raise ValueError(f"Device {device_id} not found")
-        if len(device.needed_update_ops()) > 0:
-            raise ValueError(
-                f"Device {device_id} is missing information: {device.needed_update_ops()}"
-            )
-        return DeviceSelector(self, device_id)
-
     def device_by_id(self, device_id: HexBytes) -> "DeviceSelector":
+        """Create a selector for a known device id.
+
+        Args:
+            device_id: Device id to wrap.
+
+        Returns:
+            DeviceSelector for the canonical device.
+        """
         return DeviceSelector(self, device_id)
 
     def output(self, output_id: int) -> "OutputSelector":
+        """Create a selector for a fully discovered output.
+
+        Args:
+            output_id: Output id to wrap.
+
+        Returns:
+            OutputSelector for the canonical output.
+        """
         output = self.state.outputs.get(output_id)
         if output is None:
             raise ValueError(f"Output {output_id} not found")
@@ -1015,98 +1943,528 @@ class System(VersionTrackerMixin):
         return OutputSelector(self, output_id)
 
     def output_by_name(self, name: str) -> "OutputSelector":
+        """Find an output by display name.
+
+        Args:
+            name: Output name to match, ignoring case and whitespace.
+
+        Returns:
+            OutputSelector for the matching output.
+        """
         normalized_name = _normalize_name(name)
         for output in self.state.outputs.values():
             if output.name is not None and _normalize_name(output.name) == normalized_name:
                 return OutputSelector(self, output.id)
         raise ValueError(f"Output with name {name} not found")
 
-    def all_outputs(self) -> "OutputSelector":
+    @overload
+    def all_outputs(self, expand: Literal[True]) -> "tuple[OutputSelector, ...]":
+        """Type overload for expanded concrete output selectors.
+
+        Args:
+            expand: True to request one selector per canonical output.
+
+        Returns:
+            Tuple of OutputSelector instances.
+        """
+        ...
+
+    @overload
+    def all_outputs(self, expand: Literal[False] = False) -> "OutputSelector":
+        """Type overload for the aggregate ALL_OUTPUTS selector.
+
+        Args:
+            expand: False or omitted to request the aggregate selector.
+
+        Returns:
+            OutputSelector targeting ALL_OUTPUTS.
+        """
+        ...
+
+    def all_outputs(self, expand: bool = False) -> "OutputSelector | tuple[OutputSelector, ...]":
+        """Create a selector for all outputs or expand to concrete selectors.
+
+        Args:
+            expand: When True, return one selector per canonical output.
+
+        Returns:
+            ALL_OUTPUTS selector, or a tuple of concrete OutputSelector instances.
+        """
+        if expand:
+            return tuple(OutputSelector(self, output_id) for output_id in self.state.outputs.keys())
         return OutputSelector(self, ALL_OUTPUTS)
 
     def input_by_name(
         self,
         name: str,
         *,
-        prefer_remote: bool = True,
+        prefer_remote: bool = False,
+        include_remote: bool = False,
         include_hardware_names: bool = True,
     ) -> "InputSelector":
+        """Find an input by display or hardware name.
+
+        Args:
+            name: Input name to match, ignoring case and whitespace.
+            prefer_remote: When remote inputs are included, search them before local inputs.
+            include_remote: Whether distributed source selectors should be searchable.
+            include_hardware_names: Whether model-derived hardware names should match.
+
+        Returns:
+            InputSelector for the matching input.
+        """
         normalized_name = _normalize_name(name)
-        for input in self.state.inputs.values():
-            if prefer_remote and not input.remote:
-                continue
-            if _normalize_name(input.name) == normalized_name or (
-                include_hardware_names
-                and input.hardware_name is not None
-                and _normalize_name(input.hardware_name) == normalized_name
-            ):
-                return InputSelector(self, input.device_id, input.selector)
-        if prefer_remote:
-            return self.input_by_name(
-                name,
-                prefer_remote=False,
-                include_hardware_names=include_hardware_names,
+        listed_inputs = self._listed_inputs()
+        if include_remote:
+            remote_inputs = tuple(
+                input_state for input_state in self.state.inputs.values() if input_state.remote
             )
+            inputs = (
+                (*remote_inputs, *listed_inputs)
+                if prefer_remote
+                else (*listed_inputs, *remote_inputs)
+            )
+        else:
+            inputs = listed_inputs
+        for input_state in inputs:
+            if _normalize_name(input_state.name) == normalized_name or (
+                include_hardware_names
+                and input_state.hardware_name is not None
+                and _normalize_name(input_state.hardware_name) == normalized_name
+            ):
+                return InputSelector(self, input_state.device_id, input_state.selector)
         raise ValueError(f"Input with name {name} not found")
 
-    def all_inputs(self) -> "tuple[InputSelector, ...]":
+    def all_inputs(self, *, include_remote: bool = False) -> "tuple[InputSelector, ...]":
+        """Create selectors for known inputs.
+
+        Args:
+            include_remote: Whether distributed source selectors should be included.
+
+        Returns:
+            Tuple of InputSelector instances in listing order.
+        """
+        inputs = self.state.inputs.values() if include_remote else self._listed_inputs()
         return tuple(
-            InputSelector(self, input.device_id, input.selector)
-            for input in self.state.inputs.values()
+            InputSelector(self, input_state.device_id, input_state.selector)
+            for input_state in inputs
         )
 
 
-class DeviceSelector:
+class Selector:
+    def __str__(self) -> str:
+        """Return the friendly selector representation.
+
+        Returns:
+            String containing selector properties and salient referenced ids.
+        """
+        return self._format()
+
+    @classmethod
+    def _format_value(cls, value: object) -> str:
+        """Format a property value for selector string output.
+
+        Args:
+            value: Property value to format.
+
+        Returns:
+            Human-readable string representation.
+        """
+        if isinstance(value, Selector):
+            return value._reference()
+        if isinstance(value, HexBytes | UUID):
+            return str(value)
+        if isinstance(value, tuple):
+            if not value:
+                return "()"
+            items = ", ".join(cls._format_value(item) for item in value)
+            suffix = "," if len(value) == 1 else ""
+            return f"({items}{suffix})"
+        if isinstance(value, list):
+            return "[" + ", ".join(cls._format_value(item) for item in value) + "]"
+        if isinstance(value, set):
+            return "{" + ", ".join(sorted(cls._format_value(item) for item in value)) + "}"
+        if isinstance(value, dict):
+            return (
+                "{"
+                + ", ".join(
+                    f"{cls._format_value(key)}: {cls._format_value(item)}"
+                    for key, item in value.items()
+                )
+                + "}"
+            )
+        return repr(value)
+
+    @staticmethod
+    def _format_unavailable_property(exc: Exception) -> str:
+        """Format an unavailable property exception for selector output.
+
+        Args:
+            exc: Exception raised while reading a property.
+
+        Returns:
+            Placeholder string explaining the unavailable value.
+        """
+        message = str(exc)
+        if message:
+            return f"<unavailable: {message}>"
+        return "<unavailable>"
+
+    @classmethod
+    def _property_names(cls) -> tuple[str, ...]:
+        """List property names declared by the selector class.
+
+        Returns:
+            Tuple of property names in class declaration order.
+        """
+        return tuple(name for name, value in vars(cls).items() if isinstance(value, property))
+
+    def _format_property(self, name: str, value: object) -> str:
+        """Format one named property for selector string output.
+
+        Args:
+            name: Property name being formatted.
+            value: Property value being formatted.
+
+        Returns:
+            Human-readable value string.
+        """
+        return self._format_value(value)
+
+    def _reference(self) -> str:
+        """Return the short representation used by other selectors.
+
+        Returns:
+            Selector class name with salient identifying fields.
+        """
+        return f"{type(self).__name__}()"
+
+    def _format(self) -> str:
+        """Build the full selector representation from declared properties.
+
+        Returns:
+            String containing all readable selector properties.
+        """
+        properties = []
+        for name in type(self)._property_names():
+            try:
+                value = getattr(self, name)
+            except Exception as exc:
+                formatted_value = self._format_unavailable_property(exc)
+            else:
+                formatted_value = self._format_property(name, value)
+            properties.append(f"{name}={formatted_value}")
+        return f"{type(self).__name__}(" + ", ".join(properties) + ")"
+
+
+class DeviceSelector(Selector):
     def __init__(self, system: System, device_id: HexBytes) -> None:
+        """Create a selector for a canonical device.
+
+        Args:
+            system: System that owns the canonical state.
+            device_id: Device id to select.
+
+        Returns:
+            None.
+        """
         self.system = system
-        self.device = self.system.state.devices[device_id]
+        device = self.system.state.devices.get(device_id)
+        if device is None:
+            raise ValueError(f"Device {device_id} not found")
+        self.device = device
+
+    @override
+    def _reference(self) -> str:
+        """Return a compact device selector reference.
+
+        Returns:
+            Reference string containing the device id.
+        """
+        return f"DeviceSelector(id={self.id})"
+
+    @property
+    def id(self) -> HexBytes:
+        """Return the selected device id.
+
+        Returns:
+            Device id.
+        """
+        return self.device.id
 
     @property
     def firmware(self) -> int:
+        """Return the discovered firmware version.
+
+        Returns:
+            Firmware version integer.
+        """
         assert self.device.firmware is not None
         return self.device.firmware
 
     @property
     def model_id(self) -> HexBytes:
+        """Return the discovered hardware model id.
+
+        Returns:
+            Model id bytes.
+        """
         assert self.device.model_id is not None
         return self.device.model_id
 
     @property
     def mac(self) -> HexBytes:
+        """Return the discovered network MAC address.
+
+        Returns:
+            MAC address bytes.
+        """
         assert self.device.mac is not None
         return self.device.mac
 
     @property
     def guid(self) -> UUID:
+        """Return the discovered device GUID.
+
+        Returns:
+            Device GUID.
+        """
         assert self.device.guid is not None
         return self.device.guid
 
     @property
     def outputs(self) -> "tuple[OutputSelector, ...]":
+        """Return output selectors owned by this device.
+
+        Returns:
+            Tuple of OutputSelector instances for canonical outputs on this device.
+        """
         return tuple(
-            OutputSelector(self.system, output_id) for output_id in self.device.outputs or ()
+            OutputSelector(self.system, output.id)
+            for output in self.system.state.outputs.values()
+            if (device := self.system.device_for_output(output.id)) is not None
+            and device.id == self.device.id
         )
 
     @property
     def inputs(self) -> "tuple[InputSelector, ...]":
+        """Return local input selectors owned by this device.
+
+        Returns:
+            Tuple of InputSelector instances in device input order.
+        """
         return tuple(
-            InputSelector(self.system, self.device.id, input.selector)
-            for input in self.system.inputs_by_device(self.device.id)
+            InputSelector(self.system, self.device.id, input_state.selector)
+            for input_state in self.system.inputs_by_device(self.device.id)
         )
 
 
-class OutputSelector:
+class RemoteSourceSelector(Selector):
+    def __init__(self, system: System, remote_source_id: int) -> None:
+        """Create a selector for a distributed source slot.
+
+        Args:
+            system: System that owns the canonical state.
+            remote_source_id: Zero-based distributed source slot id.
+
+        Returns:
+            None.
+        """
+        self.system = system
+        remote_source = self.system.state.remote_inputs.get(remote_source_id)
+        if remote_source is None:
+            raise ValueError(f"Remote source {remote_source_id} not found")
+        self.remote_source = remote_source
+
+    @override
+    def _reference(self) -> str:
+        """Return a compact remote source selector reference.
+
+        Returns:
+            Reference string containing slot id and protocol selector.
+        """
+        return f"RemoteSourceSelector(id={self.id}, selector=0x{self.selector:02X})"
+
+    @override
+    def _format_property(self, name: str, value: object) -> str:
+        """Format remote source properties for selector string output.
+
+        Args:
+            name: Property name being formatted.
+            value: Property value being formatted.
+
+        Returns:
+            Human-readable value string.
+        """
+        if name == "selector":
+            assert isinstance(value, int)
+            return f"0x{value:02X}"
+        if name == "remote_source" and isinstance(value, RemoteInput):
+            return f"RemoteInput(id={value.id})"
+        return super()._format_property(name, value)
+
+    @property
+    def id(self) -> int:
+        """Return the distributed source slot id.
+
+        Returns:
+            Zero-based remote source slot id.
+        """
+        return self.remote_source.id
+
+    @property
+    def selector(self) -> int:
+        """Return the protocol selector for this remote source slot.
+
+        Returns:
+            Logical selector in the distributed source range.
+        """
+        return REMOTE_SOURCE_SELECTOR_MIN + self.id
+
+    @property
+    def present(self) -> bool | None:
+        """Return whether this remote source slot is defined.
+
+        Returns:
+            True for defined slots, False for unused slots, or None when unknown.
+        """
+        return self.remote_source.present
+
+    @property
+    def name(self) -> str | None:
+        """Return the distributed source name.
+
+        Returns:
+            Remote source name, or None when unknown or unused.
+        """
+        return self.remote_source.name
+
+    @property
+    def backing_device(self) -> "DeviceSelector | None":
+        """Return the device selector for the source backing this remote slot.
+
+        Returns:
+            DeviceSelector for the backing device, or None when unresolved.
+        """
+        device = self.system.state.device_for_guid(self.remote_source.device_guid)
+        if device is None:
+            return None
+        return self.system.device_by_id(device.id)
+
+    @property
+    def backing_source_selector(self) -> int | None:
+        """Return the local source selector backing this remote slot.
+
+        Returns:
+            Local logical selector, or None when the backing source is unresolved.
+        """
+        backing_device = self.system.state.device_for_guid(self.remote_source.device_guid)
+        return self.system.state.selector_for_remote_input(
+            backing_device,
+            self.remote_source,
+        )
+
+    @property
+    def backing_input(self) -> "InputSelector | None":
+        """Return the input selector backing this remote slot.
+
+        Returns:
+            InputSelector for the backing input, or None when unresolved.
+        """
+        backing_device = self.system.state.device_for_guid(self.remote_source.device_guid)
+        backing_source = self.backing_source_selector
+        if backing_device is None or backing_source is None:
+            return None
+        input_state = self.system.input_for_device_selector(backing_device.id, backing_source)
+        if input_state is None:
+            return None
+        return InputSelector(self.system, input_state.device_id, input_state.selector)
+
+
+class OutputSelector(Selector):
     def __init__(self, system: System, output_id: int) -> None:
+        """Create a selector for one output or the ALL_OUTPUTS sentinel.
+
+        Args:
+            system: System that owns the canonical state.
+            output_id: Concrete output id or ALL_OUTPUTS.
+
+        Returns:
+            None.
+        """
         self.system = system
         self.output_id = output_id
+        if output_id != ALL_OUTPUTS and output_id not in self.system.state.outputs:
+            raise ValueError(f"Output {output_id} not found")
+
+    @staticmethod
+    def _format_output_id(output_id: int) -> str:
+        """Format an output id for selector string output.
+
+        Args:
+            output_id: Concrete output id or ALL_OUTPUTS.
+
+        Returns:
+            Human-readable output id string.
+        """
+        return "ALL_OUTPUTS" if output_id == ALL_OUTPUTS else str(output_id)
+
+    @override
+    def _reference(self) -> str:
+        """Return a compact output selector reference.
+
+        Returns:
+            Reference string containing the output id.
+        """
+        return f"OutputSelector(id={self._format_output_id(self.id)})"
+
+    @override
+    def _format_property(self, name: str, value: object) -> str:
+        """Format output selector properties for string output.
+
+        Args:
+            name: Property name being formatted.
+            value: Property value being formatted.
+
+        Returns:
+            Human-readable value string.
+        """
+        if name == "id":
+            assert isinstance(value, int)
+            return self._format_output_id(value)
+        if name == "output" and isinstance(value, OutputState):
+            return f"OutputState(id={value.id})"
+        return super()._format_property(name, value)
+
+    @property
+    def id(self) -> int:
+        """Return the selected output id.
+
+        Returns:
+            Concrete output id or ALL_OUTPUTS.
+        """
+        return self.output_id
 
     def _target_output_ids(self) -> tuple[int, ...]:
+        """Resolve this selector to concrete output ids for write commands.
+
+        Returns:
+            One concrete output id, or all canonical output ids for ALL_OUTPUTS.
+        """
         if not self.is_all_outputs:
             return (self.output_id,)
 
-        return (ALL_OUTPUTS,)
+        return tuple(self.system.state.outputs.keys())
 
     def _send_output_ops(self, ops: Iterable[codec.OutputCommand]) -> None:
+        """Send output commands when the generated command set is not empty.
+
+        Args:
+            ops: Output commands to send.
+
+        Returns:
+            None.
+        """
         ops = tuple(ops)
         if ops:
             self.system.send_ops(*ops)
@@ -1114,6 +2472,14 @@ class OutputSelector:
     def _output_value(
         self, read: Callable[[OutputState], OutputValueT | None]
     ) -> OutputValueT | None:
+        """Read a property from one output or a unanimous ALL_OUTPUTS set.
+
+        Args:
+            read: Function that extracts a value from OutputState.
+
+        Returns:
+            Concrete output value, unanimous all-output value, or None.
+        """
         output = self.output
         if output is not None:
             return read(output)
@@ -1129,16 +2495,34 @@ class OutputSelector:
 
     @property
     def is_all_outputs(self) -> bool:
+        """Return whether this selector targets ALL_OUTPUTS.
+
+        Returns:
+            True for the ALL_OUTPUTS sentinel, otherwise False.
+        """
         return self.output_id == ALL_OUTPUTS
 
     @property
     def output(self) -> OutputState | None:
+        """Return the canonical output state for a concrete selector.
+
+        Returns:
+            OutputState for concrete outputs, or None for ALL_OUTPUTS.
+        """
         if self.output_id == ALL_OUTPUTS:
             return None
-        return self.system.state.outputs[self.output_id]
+        output = self.system.state.outputs.get(self.output_id)
+        if output is None:
+            raise ValueError(f"Output {self.output_id} not found")
+        return output
 
     @property
     def name(self) -> str | None:
+        """Return the output display name.
+
+        Returns:
+            Output name for concrete outputs, or None for ALL_OUTPUTS/unknown names.
+        """
         output = self.output
         if output is not None:
             return output.name
@@ -1146,51 +2530,288 @@ class OutputSelector:
 
     @property
     def on(self) -> bool | None:
+        """Return output power state.
+
+        Returns:
+            Power state for a concrete output, unanimous all-output state, or None.
+        """
         return self._output_value(lambda output: output.on)
 
     @property
     def muted(self) -> bool | None:
+        """Return output mute state.
+
+        Returns:
+            Mute state for a concrete output, unanimous all-output state, or None.
+        """
         return self._output_value(lambda output: output.muted)
+
+    def _remote_source_for_output(self, output: OutputState) -> RemoteSourceSelector | None:
+        """Resolve an output's remote source to a selector.
+
+        Args:
+            output: Output state to inspect.
+
+        Returns:
+            RemoteSourceSelector for the active remote source, or None.
+        """
+        remote_source = self.system.output_remote_source(output)
+        if remote_source is None:
+            return None
+        return RemoteSourceSelector(self.system, remote_source.id)
+
+    def _local_source_selector_for_output(self, output: OutputState) -> int | None:
+        """Infer the active local source selector for an output.
+
+        Args:
+            output: Output state to inspect.
+
+        Returns:
+            Local selector reported by the output or inferred from a same-device remote source.
+        """
+        if output.local_source_selector is not None:
+            return output.local_source_selector
+
+        remote_source = self._remote_source_for_output(output)
+        if remote_source is None:
+            return None
+        backing_device = remote_source.backing_device
+        backing_source = remote_source.backing_source_selector
+        output_device = self.system.device_for_output(output.id)
+        if (
+            output_device is not None
+            and backing_device is not None
+            and output_device.id == backing_device.id
+        ):
+            return backing_source
+        return None
+
+    def _active_sources_for_output(self, output: OutputState) -> tuple[int, ...]:
+        """Return all interpreted active source selectors for an output.
+
+        Args:
+            output: Output state to inspect.
+
+        Returns:
+            Ordered, de-duplicated selectors including inferred local and reported sources.
+        """
+        sources = []
+        seen = set()
+        for source in (
+            self._local_source_selector_for_output(output),
+            *output.reported_sources,
+        ):
+            if source is not None and source not in seen:
+                sources.append(source)
+                seen.add(source)
+        return tuple(sources)
+
+    def _selected_source_for_output(self, output: OutputState) -> int | None:
+        """Return the preferred active source selector for an output.
+
+        Args:
+            output: Output state to inspect.
+
+        Returns:
+            First interpreted active selector, or None when no source is known.
+        """
+        active_sources = self._active_sources_for_output(output)
+        if active_sources:
+            return active_sources[0]
+        return None
 
     @property
     def source(self) -> int | None:
-        return self._output_value(lambda output: output.source)
+        """Return the preferred active source selector.
+
+        Returns:
+            Concrete or unanimous active selector, or None when ambiguous or unknown.
+        """
+        return self._output_value(self._selected_source_for_output)
+
+    @property
+    def source_raw(self) -> int | None:
+        """Return the raw source byte reported by output state.
+
+        Returns:
+            Concrete or unanimous raw source byte, or None.
+        """
+        return self._output_value(lambda output: output.source_raw)
+
+    @property
+    def source_detail(self) -> tuple[int, ...] | None:
+        """Return preserved source-selection detail bytes.
+
+        Returns:
+            Concrete or unanimous detail byte tuple, or None.
+        """
+        return self._output_value(lambda output: output.source_detail)
+
+    @property
+    def reported_sources(self) -> tuple[int, ...] | None:
+        """Return normalized selectors reported by output state.
+
+        Returns:
+            Concrete or unanimous reported source tuple, or None.
+        """
+        return self._output_value(lambda output: output.reported_sources)
+
+    @property
+    def active_sources(self) -> tuple[int, ...] | None:
+        """Return interpreted active source selectors.
+
+        Returns:
+            Concrete or unanimous active selector tuple, or None.
+        """
+        return self._output_value(self._active_sources_for_output)
+
+    @property
+    def local_source_selector(self) -> int | None:
+        """Return the interpreted local source selector.
+
+        Returns:
+            Concrete or unanimous local selector, or None.
+        """
+        return self._output_value(self._local_source_selector_for_output)
+
+    @property
+    def local_source(self) -> int | None:
+        """Return the interpreted local source selector alias.
+
+        Returns:
+            Same value as local_source_selector.
+        """
+        return self.local_source_selector
+
+    @property
+    def remote_source_selector(self) -> int | None:
+        """Return the reported remote source selector.
+
+        Returns:
+            Concrete or unanimous remote selector, or None.
+        """
+        return self._output_value(lambda output: output.remote_source_selector)
+
+    @property
+    def remote_source(self) -> RemoteSourceSelector | None:
+        """Return the active remote source selector object.
+
+        Returns:
+            RemoteSourceSelector for the active present remote source, or None.
+        """
+        remote_source_selector = self.remote_source_selector
+        if remote_source_selector is None:
+            return None
+        remote_source_id = remote_source_selector - REMOTE_SOURCE_SELECTOR_MIN
+        remote_source = self.system.state.remote_inputs.get(remote_source_id)
+        if remote_source is None or not remote_source.present:
+            return None
+        return RemoteSourceSelector(self.system, remote_source_id)
+
+    @property
+    def remote_backing_device(self) -> "DeviceSelector | None":
+        """Return the device backing the active remote source.
+
+        Returns:
+            DeviceSelector for the remote backing device, or None.
+        """
+        remote_source = self.remote_source
+        if remote_source is None:
+            return None
+        return remote_source.backing_device
+
+    @property
+    def remote_backing_input(self) -> "InputSelector | None":
+        """Return the input backing the active remote source.
+
+        Returns:
+            InputSelector for the remote backing input, or None.
+        """
+        remote_source = self.remote_source
+        if remote_source is None:
+            return None
+        return remote_source.backing_input
 
     @property
     def volume(self) -> float | None:
+        """Return output volume.
+
+        Returns:
+            Concrete or unanimous output volume, or None.
+        """
         return self._output_value(lambda output: output.volume)
 
     @property
     def max_volume(self) -> float | None:
+        """Return output maximum volume.
+
+        Returns:
+            Concrete or unanimous maximum volume, or None.
+        """
         return self._output_value(lambda output: output.max_volume)
 
     @property
     def device(self) -> DeviceSelector:
+        """Return the device that owns this concrete output.
+
+        Returns:
+            DeviceSelector for the owning device.
+        """
         if self.is_all_outputs:
             raise ValueError("Cannot determine device for ALL_OUTPUTS selector")
         device = self.system.device_for_output(self.output_id)
         if device is None:
             raise ValueError(f"Cannot find device for output {self.output_id}")
-        return self.system.device(device.id)
+        return self.system.device_by_id(device.id)
 
     @property
     def input(self) -> "InputSelector | None":
+        """Return the input currently selected by this concrete output.
+
+        Returns:
+            InputSelector for the active input, or None when no input is known.
+        """
         if self.is_all_outputs:
             raise ValueError("Cannot determine input for ALL_OUTPUTS selector")
-        source = self.source
-        if source is None:
+        output = self.output
+        if output is None:
+            return None
+
+        output_device = self.system.device_for_output(self.output_id)
+        local_source = self._local_source_selector_for_output(output)
+        if local_source is not None and output_device is not None:
+            input_state = self.system.input_for_device_selector(output_device.id, local_source)
+            if input_state is not None:
+                return InputSelector(self.system, input_state.device_id, input_state.selector)
+
+        remote_source = self._remote_source_for_output(output)
+        if remote_source is not None:
+            backing_input = remote_source.backing_input
+            if backing_input is not None:
+                return backing_input
+
+        remote_source_selector = output.remote_source_selector
+        if remote_source_selector is None:
             return None
         device = self.system.device_for_output(self.output_id)
         if device is None:
             raise ValueError(f"Cannot find device for output {self.output_id}")
-        input = self.system.input_for_device_selector(device.id, source)
-        if input is None:
+        input_state = self.system.input_for_device_selector(device.id, remote_source_selector)
+        if input_state is None:
             raise ValueError(
-                f"Cannot find input for output {self.output_id} on device {device.id} with source {source}"
+                f"Cannot find input for output {self.output_id} on device {device.id} with source {remote_source_selector}"
             )
-        return InputSelector(self.system, input.device_id, input.selector)
+        return InputSelector(self.system, input_state.device_id, input_state.selector)
 
     def enable(self, on: bool = True) -> None:
+        """Set output power state.
+
+        Args:
+            on: True to power on, False to power off.
+
+        Returns:
+            None.
+        """
         self._send_output_ops(
             codec.StandbyPowerCommand(
                 output=output_id,
@@ -1200,9 +2821,22 @@ class OutputSelector:
         )
 
     def disable(self) -> None:
+        """Power off the selected output or outputs.
+
+        Returns:
+            None.
+        """
         self.enable(on=False)
 
     def mute(self, muted: bool = True) -> None:
+        """Set output mute state.
+
+        Args:
+            muted: True to mute, False to unmute.
+
+        Returns:
+            None.
+        """
         self._send_output_ops(
             codec.MuteCommand(
                 output=output_id,
@@ -1212,50 +2846,175 @@ class OutputSelector:
         )
 
     def unmute(self) -> None:
+        """Unmute the selected output or outputs.
+
+        Returns:
+            None.
+        """
         self.mute(muted=False)
 
     def set_volume(self, volume: float) -> None:
+        """Set output volume.
+
+        Args:
+            volume: Volume value to send to the device.
+
+        Returns:
+            None.
+        """
         self._send_output_ops(
             codec.VolumeCommand(output=output_id, volume=volume)
             for output_id in self._target_output_ids()
         )
 
     def set_max_volume(self, max_volume: float) -> None:
+        """Set output maximum volume.
+
+        Args:
+            max_volume: Maximum volume value to send to the device.
+
+        Returns:
+            None.
+        """
         self._send_output_ops(
             codec.MaximumVolumeCommand(output=output_id, max_volume=max_volume)
             for output_id in self._target_output_ids()
         )
 
     def set_input(self, input: "InputSelector") -> None:
+        """Route an input to this output or to all known outputs.
+
+        Args:
+            input: InputSelector identifying the desired source.
+
+        Returns:
+            None.
+        """
         self._send_output_ops(
-            codec.SourceSelectionCommand(
-                output=output_id,
-                source=input.selector,
+            self.system.source_selection_commands_for_input(
+                self.output_id,
+                input.input,
             )
-            for output_id in self._target_output_ids()
         )
 
 
-class InputSelector:
+class InputSelector(Selector):
     def __init__(self, system: System, device_id: HexBytes, selector: int) -> None:
+        """Create a selector for a canonical input.
+
+        Args:
+            system: System that owns the canonical state.
+            device_id: Device id that owns the input.
+            selector: Logical source selector.
+
+        Returns:
+            None.
+        """
         self.system = system
-        self.input = self.system.state.inputs[(device_id, selector)]
+        input_state = self.system.state.inputs.get((device_id, selector))
+        if input_state is None:
+            raise ValueError(f"Input {device_id}:0x{selector:02X} not found")
+        self.input = input_state
+
+    @override
+    def _reference(self) -> str:
+        """Return a compact input selector reference.
+
+        Returns:
+            Reference string containing device id, selector, and qualified name.
+        """
+        return (
+            "InputSelector("
+            f"device_id={self.device_id}, "
+            f"selector=0x{self.selector:02X}, "
+            f"qualified_name={self.qualified_name}"
+            ")"
+        )
+
+    @override
+    def _format_property(self, name: str, value: object) -> str:
+        """Format input selector properties for string output.
+
+        Args:
+            name: Property name being formatted.
+            value: Property value being formatted.
+
+        Returns:
+            Human-readable value string.
+        """
+        if name == "selector":
+            assert isinstance(value, int)
+            return f"0x{value:02X}"
+        return super()._format_property(name, value)
+
+    @property
+    def device_id(self) -> HexBytes:
+        """Return the id of the device that owns this input.
+
+        Returns:
+            Device id.
+        """
+        return self.input.device_id
 
     @property
     def selector(self) -> int:
+        """Return the logical source selector for this input.
+
+        Returns:
+            Source selector byte.
+        """
         return self.input.selector
 
     @property
+    def qualified_name(self) -> str:
+        """Return the stable device-qualified input name.
+
+        Returns:
+            Qualified input name from InputState.
+        """
+        return self.input.qualified_name
+
+    @property
     def name(self) -> str:
+        """Return the best available display name for this input.
+
+        Returns:
+            Input display name.
+        """
         return self.input.name
 
     @property
     def device(self) -> DeviceSelector:
-        return self.system.device(self.input.device_id)
+        """Return the device selector for this input's device.
+
+        Returns:
+            DeviceSelector for the owning device.
+        """
+        return self.system.device_by_id(self.input.device_id)
 
     @property
     def outputs(self) -> "tuple[OutputSelector, ...]":
-        return tuple(
-            OutputSelector(self.system, output.id)
-            for output in self.system.outputs_by_input(self.input)
-        )
+        """Return outputs currently selecting this input.
+
+        Returns:
+            Tuple of OutputSelector instances whose active input resolves to this input.
+        """
+        outputs = []
+        for output in self.system.state.outputs.values():
+            output_selector = OutputSelector(self.system, output.id)
+            output_device = self.system.device_for_output(output.id)
+            if (
+                output_device is not None
+                and output_device.id == self.input.device_id
+                and self.input.selector in output.reported_sources
+            ):
+                outputs.append(output_selector)
+                continue
+
+            try:
+                selected_input = output_selector.input
+            except ValueError:
+                continue
+            if selected_input is not None and selected_input.input == self.input:
+                outputs.append(output_selector)
+        return tuple(outputs)

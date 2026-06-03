@@ -34,10 +34,12 @@ from amp.codec import (
     RequestZoneAssignmentsCommandResponse,
     VolumeCommand,
 )
+from amp.hardware import MA6
 from amp.system import (
     PHYSICAL_SOURCE_ID_BY_LOGICAL_SELECTOR,
     REMOTE_INPUT_SLOT_IDS,
     DeviceState,
+    InputSelector,
     InputState,
     OutputState,
     RemoteInput,
@@ -45,13 +47,14 @@ from amp.system import (
     SystemState,
 )
 from amp.toggle_bool import ToggleBool
-from amp.transport import ConnectionInterrupted
+from amp.transport import BaseTransport, ConnectionInterrupted, Transport
 
 
 GUID = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
+OTHER_GUID = UUID("11111111-2222-3333-4444-555555555555")
 
 
-class FakeTransport:
+class FakeTransport(BaseTransport[Command]):
     def __init__(self, host: str = "10.1.0.200") -> None:
         self.host = host
         self.sent: list[tuple[Command, ...]] = []
@@ -127,8 +130,14 @@ def test_input_remote_selector_range_stops_before_casting_selectors() -> None:
     ).remote
     assert InputState(
         device_id=HexBytes("00D4"),
-        selector=0x4F,
-        assigned_name="Remote 4F",
+        selector=0x3F,
+        assigned_name="Remote 3F",
+        hidden_name=None,
+    ).remote
+    assert not InputState(
+        device_id=HexBytes("00D4"),
+        selector=0x40,
+        assigned_name="Audio-only S5",
         hidden_name=None,
     ).remote
     assert not InputState(
@@ -137,6 +146,22 @@ def test_input_remote_selector_range_stops_before_casting_selectors() -> None:
         assigned_name="Casting",
         hidden_name=None,
     ).remote
+
+
+def test_model_hardware_source_metadata_controls_physical_source_ids() -> None:
+    local = InputState(device_id=HexBytes("6012"), selector=0x03)
+    local.apply_hardware_source(MA6.local_sources[3])
+
+    assert local.hardware_kind == "local"
+    assert local.physical_source_id == 4
+    assert local.qualified_name == "6012:4"
+
+    casting = InputState(device_id=HexBytes("6012"), selector=0x0B)
+    casting.apply_hardware_source(MA6.casting_sources[0])
+
+    assert casting.hardware_kind == "casting"
+    assert casting.physical_source_id is None
+    assert casting.qualified_name == "6012:0x0B"
 
 
 def test_input_name_prefers_assigned_name_over_hardware_name() -> None:
@@ -234,7 +259,7 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     assert output.name is None
     assert output.on is None
     assert output.muted is None
-    assert output.source is None
+    assert output.source_raw is None
     assert output.volume is None
     assert output.max_volume is None
     assert all(not op.is_write() for op in output.needed_update_ops())
@@ -242,7 +267,11 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
     output.update(StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.On))
     output.update(StandbyPowerCommand(output=1, is_on=ToggleBool.Toggle))
     output.update(MuteCommand(output=1, is_muted=ToggleBool.Off))
-    output.update(SourceSelectionCommand(output=1, source=0x05))
+    output.update(SourceSelectionCommand(output=1, source=0x45))
+
+    assert output.source_raw == 0x45
+    assert output.source_detail == ()
+
     output.update(SourceSelectionCommand(output=1, source=0xA6))
     output.update(VolumeCommand(output=1, volume=0.5))
     output.update(MaximumVolumeCommand(output=1, max_volume=0.75))
@@ -250,7 +279,8 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
 
     assert output.on is False
     assert output.muted is False
-    assert output.source == 0x26
+    assert output.source_raw == 0xA6
+    assert output.source_detail == ()
     assert output.volume == 0.5
     assert output.max_volume == 0.75
     assert output.name == "Kitchen"
@@ -267,6 +297,15 @@ def test_output_tracks_missing_read_only_update_ops_and_readbacks() -> None:
         VolumeCommand,
         MaximumVolumeCommand,
     ]
+
+
+def test_output_source_selection_tracks_local_and_remote_report_bytes() -> None:
+    output = OutputState(id=1)
+
+    output.update(SourceSelectionCommand(output=1, source=0xA0, detail=(0x42,)))
+
+    assert output.source_raw == 0xA0
+    assert output.source_detail == (0x42,)
 
 
 def test_remote_input_tracks_missing_read_only_update_ops_and_readbacks() -> None:
@@ -298,6 +337,72 @@ def test_remote_input_tracks_missing_read_only_update_ops_and_readbacks() -> Non
     assert remote_input.needed_update_ops() == []
 
 
+def test_system_derives_remote_source_backing_source_when_available() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.model_id = HexBytes("B0")
+            device.outputs = (1,)
+            device.guid = GUID
+            system.apply_hardware_defaults()
+
+            system.update(SourceSelectionCommand(output=1, source=0x20))
+            output = system.state.outputs[1]
+
+            assert output.source_raw == 0x20
+            assert output.source_detail == ()
+            assert output.remote_source_selector == 0x20
+            assert output.local_source_selector is None
+            assert output.selected_reported_source_selector == 0x20
+            assert system.output_remote_source(output) is None
+
+            output.name = "Kitchen"
+            output.on = True
+            output.muted = False
+            output.volume = 0.5
+            output.max_volume = 1.0
+            output_selector = system.output(1)
+
+            assert output_selector.local_source_selector is None
+            assert output_selector.remote_source_selector == 0x20
+            assert output_selector.remote_source is None
+            assert output_selector.active_sources == (0x20,)
+            assert output_selector.source == 0x20
+
+            system.update(
+                DistributedSourceDefinitionCommand(
+                    slot_id=0,
+                    backing_device_guid=GUID,
+                    source_index=6,
+                    name="W1",
+                )
+            )
+
+            assert output.source_raw == 0x20
+            assert output.source_detail == ()
+            remote_source = system.output_remote_source(output)
+
+            assert remote_source == system.state.remote_inputs[0]
+            assert output_selector.remote_source is not None
+            assert output_selector.remote_source.id == 0
+            assert output_selector.remote_source.selector == 0x20
+            assert output_selector.remote_source.backing_device is not None
+            assert output_selector.remote_source.backing_device.device == device
+            assert output_selector.remote_source.backing_source_selector == 0x02
+            assert output_selector.remote_source.backing_input is not None
+            assert output_selector.remote_source.backing_input.selector == 0x02
+            assert output_selector.local_source_selector == 0x02
+            assert output_selector.active_sources == (0x02, 0x20)
+            assert output_selector.source == 0x02
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_system_accepts_host_strings_and_builds_transports() -> None:
     async def scenario() -> None:
         single = System(
@@ -310,6 +415,7 @@ def test_system_accepts_host_strings_and_builds_transports() -> None:
         )
         try:
             assert len(single.transports) == 1
+            assert isinstance(single.transport, Transport)
             assert single.transport.host == "127.0.0.1"
             assert single.transport.port == 12345
             assert single.transport.reconnection_wait_secs == 0.1
@@ -322,11 +428,17 @@ def test_system_accepts_host_strings_and_builds_transports() -> None:
 
         multiple = System(("127.0.0.1", "127.0.0.2"), port=12346)
         try:
-            assert [transport.host for transport in multiple.transports] == [
+            concrete_transports = tuple(
+                transport
+                for transport in multiple.transports
+                if isinstance(transport, Transport)
+            )
+            assert len(concrete_transports) == 2
+            assert [transport.host for transport in concrete_transports] == [
                 "127.0.0.1",
                 "127.0.0.2",
             ]
-            assert [transport.port for transport in multiple.transports] == [12346, 12346]
+            assert [transport.port for transport in concrete_transports] == [12346, 12346]
         finally:
             multiple.shutdown()
 
@@ -338,7 +450,7 @@ def test_system_accepts_host_strings_and_builds_transports() -> None:
 def test_system_async_context_manager_awaits_transport_close_and_event_tasks() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        async with System(transport) as system:  # type: ignore[arg-type]
+        async with System(transport) as system:
             tasks = tuple(system.tasks)
             assert tasks
             assert not tasks[0].done()
@@ -353,7 +465,7 @@ def test_system_async_context_manager_awaits_transport_close_and_event_tasks() -
 def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             transport.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
             transport.push(
@@ -425,7 +537,7 @@ def test_system_applies_transport_events_to_devices_inputs_and_outputs() -> None
 def test_device_host_info_updates_matching_device_identity_without_setting_host() -> None:
     async def scenario() -> None:
         transport = FakeTransport(host="10.1.0.201")
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             device = system.state.devices[HexBytes("6012")]
             device.guid = UUID("6c126887-df88-bd41-abbd-079c4e743694")
@@ -453,7 +565,7 @@ def test_device_host_info_updates_matching_device_identity_without_setting_host(
 def test_generic_device_id_readbacks_do_not_assign_transport_host() -> None:
     async def scenario() -> None:
         transport = FakeTransport(host="10.1.0.201")
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             transport.push(
                 RequestDeviceInformationCommandResponse(
@@ -480,7 +592,7 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
         transport_201 = FakeTransport(host="10.1.0.201")
-        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        system = System((transport_200, transport_201))
         try:
             transport_200.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("00D4"), zones=(1, 2)))
             transport_201.push(RequestZoneAssignmentsCommandResponse(device_id=HexBytes("6012"), zones=(9, 10)))
@@ -495,7 +607,7 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
                 output.name = f"Output {output_id}"
                 output.on = True
                 output.muted = False
-                output.source = 0x05
+                output.source_raw = 0x05
                 output.volume = 0.5
                 output.max_volume = 1.0
 
@@ -510,8 +622,74 @@ def test_multi_transport_events_are_shared_and_writes_stay_on_device_transport()
 
             system.all_outputs().mute()
 
-            assert transport_200.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
-            assert transport_201.sent == [(MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),)]
+            assert transport_200.sent == [
+                (
+                    MuteCommand(output=1, is_muted=ToggleBool.On),
+                    MuteCommand(output=2, is_muted=ToggleBool.On),
+                )
+            ]
+            assert transport_201.sent == [
+                (
+                    MuteCommand(output=9, is_muted=ToggleBool.On),
+                    MuteCommand(output=10, is_muted=ToggleBool.On),
+                )
+            ]
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_all_outputs_event_updates_only_canonical_outputs() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport(host="10.1.0.200")
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.host = "10.1.0.200"
+            device.outputs = (1, 2)
+
+            transport.push(StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.Off))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert list(system.state.outputs) == []
+
+            output = system.state.outputs[1]
+            output.on = True
+
+            transport.push(StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.Off))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert system.state.outputs[1].on is False
+            assert list(system.state.outputs) == [1]
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_targeted_output_event_requires_known_device_assignment() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            transport.push(StandbyPowerCommand(output=1, is_on=ToggleBool.On))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert list(system.state.outputs) == []
+
+            system.state.devices[HexBytes("00D4")].outputs = (1,)
+            transport.push(StandbyPowerCommand(output=1, is_on=ToggleBool.On))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert list(system.state.outputs) == [1]
+            assert system.state.outputs[1].on is True
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -523,7 +701,7 @@ def test_all_outputs_source_name_event_updates_devices_for_transport_host() -> N
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
         transport_201 = FakeTransport(host="10.1.0.201")
-        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        system = System((transport_200, transport_201))
         try:
             device_200 = system.state.devices[HexBytes("00D4")]
             device_200.host = "10.1.0.200"
@@ -558,13 +736,13 @@ def test_output_events_can_identify_device_transport_when_host_is_unknown() -> N
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
         transport_201 = FakeTransport(host="10.1.0.201")
-        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        system = System((transport_200, transport_201))
         try:
             system.state.devices[HexBytes("6012")].outputs = (9, 10)
             output = system.state.outputs[9]
             output.name = "Patio"
             output.muted = False
-            output.source = 0x05
+            output.source_raw = 0x05
             output.volume = 0.5
             output.max_volume = 1.0
 
@@ -589,7 +767,7 @@ def test_unknown_host_output_reads_fan_out_but_writes_do_not() -> None:
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
         transport_201 = FakeTransport(host="10.1.0.201")
-        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        system = System((transport_200, transport_201))
         try:
             system.state.devices[HexBytes("6012")].outputs = (9,)
 
@@ -611,13 +789,28 @@ def test_unknown_host_output_reads_fan_out_but_writes_do_not() -> None:
 def test_selector_commands_emit_typed_codec_ops_for_all_outputs() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
-            system.state.devices[HexBytes("00D4")].outputs = (1, 2)
-            system.state.devices[HexBytes("6012")].outputs = (9, 10)
+            source_device = system.state.devices[HexBytes("00D4")]
+            source_device.outputs = (1, 2)
+            source_device.guid = GUID
+            source_device.model_id = HexBytes("B0")
+            target_device = system.state.devices[HexBytes("6012")]
+            target_device.outputs = (9, 10)
+            target_device.guid = OTHER_GUID
+            target_device.model_id = HexBytes("E9")
+            system.apply_hardware_defaults()
             _ = system.state.outputs[2]
+            _ = system.state.outputs[10]
+            assert list(system.state.outputs) == [2, 10]
 
-            w1 = system.state.inputs[(HexBytes("00D4"), 0x20)]
+            remote_w1 = system.state.remote_inputs[0]
+            remote_w1.present = True
+            remote_w1.device_guid = GUID
+            remote_w1.source_index = 6
+            remote_w1.name = "W1"
+
+            w1 = system.state.inputs[(HexBytes("00D4"), 0x02)]
             w1.name = "W1"
             all_outputs = system.all_outputs()
 
@@ -630,16 +823,37 @@ def test_selector_commands_emit_typed_codec_ops_for_all_outputs() -> None:
             all_outputs.set_input(system.input_by_name("W1"))
 
             assert transport.sent == [
-                (MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.On),),
-                (MuteCommand(output=ALL_OUTPUTS, is_muted=ToggleBool.Off),),
-                (StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.On),),
-                (StandbyPowerCommand(output=ALL_OUTPUTS, is_on=ToggleBool.Off),),
-                (VolumeCommand(output=ALL_OUTPUTS, volume=0.5),),
-                (MaximumVolumeCommand(output=ALL_OUTPUTS, max_volume=0.75),),
-                (SourceSelectionCommand(output=ALL_OUTPUTS, source=0x20),),
+                (
+                    MuteCommand(output=2, is_muted=ToggleBool.On),
+                    MuteCommand(output=10, is_muted=ToggleBool.On),
+                ),
+                (
+                    MuteCommand(output=2, is_muted=ToggleBool.Off),
+                    MuteCommand(output=10, is_muted=ToggleBool.Off),
+                ),
+                (
+                    StandbyPowerCommand(output=2, is_on=ToggleBool.On),
+                    StandbyPowerCommand(output=10, is_on=ToggleBool.On),
+                ),
+                (
+                    StandbyPowerCommand(output=2, is_on=ToggleBool.Off),
+                    StandbyPowerCommand(output=10, is_on=ToggleBool.Off),
+                ),
+                (
+                    VolumeCommand(output=2, volume=0.5),
+                    VolumeCommand(output=10, volume=0.5),
+                ),
+                (
+                    MaximumVolumeCommand(output=2, max_volume=0.75),
+                    MaximumVolumeCommand(output=10, max_volume=0.75),
+                ),
+                (
+                    SourceSelectionCommand(output=2, source=0x02),
+                    SourceSelectionCommand(output=10, source=0x20, detail=(0x42,)),
+                ),
             ]
             assert all(
-                op.output == ALL_OUTPUTS
+                op.output in (2, 10)
                 for batch in transport.sent
                 for op in batch
                 if isinstance(op, OutputCommand)
@@ -651,10 +865,100 @@ def test_selector_commands_emit_typed_codec_ops_for_all_outputs() -> None:
     asyncio.run(scenario())
 
 
+def test_output_selector_set_input_routes_local_and_remote_sources() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            source_device = system.state.devices[HexBytes("00D4")]
+            source_device.outputs = (1,)
+            source_device.guid = GUID
+            source_device.model_id = HexBytes("B0")
+            target_device = system.state.devices[HexBytes("6012")]
+            target_device.outputs = (9,)
+            target_device.guid = OTHER_GUID
+            target_device.model_id = HexBytes("E9")
+            system.apply_hardware_defaults()
+            for output_id in (1, 9):
+                output = system.state.outputs[output_id]
+                output.name = f"Output {output_id}"
+                output.on = True
+                output.muted = False
+                output.source_raw = 0x05
+                output.volume = 0.5
+                output.max_volume = 1.0
+
+            remote_w1 = system.state.remote_inputs[4]
+            remote_w1.present = True
+            remote_w1.device_guid = GUID
+            remote_w1.source_index = 6
+            remote_w1.name = "W1"
+
+            w1 = system.state.inputs[(HexBytes("00D4"), 0x02)]
+            w1.name = "W1"
+            input_selector = system.input_by_name("W1")
+
+            system.output(1).set_input(input_selector)
+            system.output(9).set_input(input_selector)
+
+            assert transport.sent == [
+                (SourceSelectionCommand(output=1, source=0x02),),
+                (SourceSelectionCommand(output=9, source=0x24, detail=(0x42,)),),
+            ]
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_output_selector_set_input_rejects_missing_remote_mapping() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            source_device = system.state.devices[HexBytes("00D4")]
+            source_device.outputs = (1,)
+            source_device.guid = GUID
+            source_device.model_id = HexBytes("B0")
+            target_device = system.state.devices[HexBytes("6012")]
+            target_device.outputs = (9,)
+            target_device.guid = OTHER_GUID
+            target_device.model_id = HexBytes("E9")
+            system.apply_hardware_defaults()
+            output = system.state.outputs[9]
+            output.name = "Output 9"
+            output.on = True
+            output.muted = False
+            output.source_raw = 0x05
+            output.volume = 0.5
+            output.max_volume = 1.0
+
+            w1 = system.state.inputs[(HexBytes("00D4"), 0x02)]
+            w1.name = "W1"
+
+            try:
+                system.output(9).set_input(system.input_by_name("W1"))
+            except ValueError as exc:
+                message = str(exc)
+                assert "no distributed source mapping" in message
+                assert "00D4" in message
+                assert "6012" in message
+            else:
+                raise AssertionError("cross-device input should require a remote mapping")
+
+            assert transport.sent == []
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_output_selector_resolves_device_and_input() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             device = system.state.devices[HexBytes("00D4")]
             device.firmware = 6
@@ -674,11 +978,11 @@ def test_output_selector_resolves_device_and_input() -> None:
             output.name = "Kitchen"
             output.on = True
             output.muted = False
-            output.source = 0x26
+            output.source_raw = 0x26
             output.volume = 0.5
             output.max_volume = 1.0
             other_output = system.state.outputs[9]
-            other_output.source = 0x26
+            other_output.source_raw = 0x26
 
             output_selector = system.output(1)
             selected_input = output_selector.input
@@ -709,26 +1013,149 @@ def test_output_selector_resolves_device_and_input() -> None:
     asyncio.run(scenario())
 
 
+def test_device_selector_outputs_returns_only_canonical_outputs() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.outputs = (1, 2)
+            _ = system.state.outputs[2]
+
+            selector = system.device_by_id(HexBytes("00D4"))
+
+            assert tuple(output.output_id for output in selector.outputs) == (2,)
+            assert list(system.state.outputs) == [2]
+
+            try:
+                system.device_by_id(HexBytes("6012"))
+            except ValueError as exc:
+                assert "6012" in str(exc)
+            else:
+                raise AssertionError("unknown device selector should not create state")
+
+            try:
+                InputSelector(system, HexBytes("00D4"), 0x05)
+            except ValueError as exc:
+                assert "00D4:0x05" in str(exc)
+            else:
+                raise AssertionError("unknown input selector should not create state")
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_selector_str_prints_properties_with_compact_selector_references() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.firmware = 6
+            device.model_id = HexBytes("B0")
+            device.outputs = (1,)
+            device.guid = GUID
+            device.mac = HexBytes("ACE14F0055B4")
+            system.apply_hardware_defaults()
+
+            input = system.state.inputs[(HexBytes("00D4"), 0x05)]
+            input.name = "A1"
+
+            output = system.state.outputs[1]
+            output.name = "Kitchen"
+            output.on = True
+            output.muted = False
+            output.source_raw = 0x05
+            output.volume = 0.5
+            output.max_volume = 1.0
+
+            device_text = str(system.device_by_id(HexBytes("00D4")))
+            output_text = str(system.output(1))
+            input_text = str(system.input_by_name("A1"))
+
+            assert device_text.startswith("DeviceSelector(")
+            assert "id=00D4" in device_text
+            assert "outputs=(OutputSelector(id=1),)" in device_text
+            assert (
+                "inputs=(InputSelector(device_id=00D4, selector=0x05, qualified_name=00D4:1)"
+                in device_text
+            )
+
+            assert output_text.startswith("OutputSelector(")
+            assert "id=1" in output_text
+            assert "output=OutputState(id=1)" in output_text
+            assert "device=DeviceSelector(id=00D4)" in output_text
+            assert (
+                "input=InputSelector(device_id=00D4, selector=0x05, qualified_name=00D4:1)"
+                in output_text
+            )
+
+            assert input_text.startswith("InputSelector(")
+            assert "device_id=00D4" in input_text
+            assert "selector=0x05" in input_text
+            assert "qualified_name='00D4:1'" in input_text
+            assert "device=DeviceSelector(id=00D4)" in input_text
+            assert "outputs=(OutputSelector(id=1),)" in input_text
+
+            all_outputs_text = str(system.all_outputs())
+
+            assert "id=ALL_OUTPUTS" in all_outputs_text
+            assert "is_all_outputs=True" in all_outputs_text
+            assert "device=<unavailable: Cannot determine device for ALL_OUTPUTS selector>" in (
+                all_outputs_text
+            )
+            assert "input=<unavailable: Cannot determine input for ALL_OUTPUTS selector>" in (
+                all_outputs_text
+            )
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_by_name_selectors_ignore_case_and_whitespace() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             remote = system.state.inputs[(HexBytes("00D4"), 0x26)]
             remote.name = "Player C"
+            local_duplicate = system.state.inputs[(HexBytes("00D4"), 0x06)]
+            local_duplicate.name = "Player C"
             local = system.state.inputs[(HexBytes("00D4"), 0x05)]
             local.name = "Kitchen Input"
+            remote_only = system.state.inputs[(HexBytes("00D4"), 0x27)]
+            remote_only.name = "Remote Only"
 
             output = system.state.outputs[1]
             output.name = "Patio West"
             output.on = True
             output.muted = False
-            output.source = 0x26
+            output.source_raw = 0x26
             output.volume = 0.5
             output.max_volume = 1.0
 
-            assert system.input_by_name(" playerc ").selector == 0x26
+            assert system.input_by_name(" playerc ").selector == 0x06
+            assert system.input_by_name(" playerc ", include_remote=True).selector == 0x06
+            assert (
+                system.input_by_name(
+                    " playerc ",
+                    include_remote=True,
+                    prefer_remote=True,
+                ).selector
+                == 0x26
+            )
             assert system.input_by_name("KITCHENinput").selector == 0x05
+            try:
+                system.input_by_name("remote only")
+            except ValueError as exc:
+                assert "remote only" in str(exc)
+            else:
+                raise AssertionError("remote inputs should be hidden from name lookup by default")
+            assert system.input_by_name("remote only", include_remote=True).selector == 0x27
             assert system.output_by_name(" patio   west ").output_id == 1
         finally:
             system.shutdown()
@@ -737,23 +1164,41 @@ def test_by_name_selectors_ignore_case_and_whitespace() -> None:
     asyncio.run(scenario())
 
 
-def test_all_inputs_returns_selectors_for_current_inputs() -> None:
+def test_all_inputs_returns_non_remote_selectors_in_physical_order() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
-            input_b = system.state.inputs[(HexBytes("6012"), 0x09)]
-            input_b.name = "Input B"
-            input_a = system.state.inputs[(HexBytes("00D4"), 0x05)]
-            input_a.name = "Input A"
+            input_a = system.state.inputs[(HexBytes("00D4"), 0x03)]
+            input_a.name = "Input A4"
+            input_b = system.state.inputs[(HexBytes("00D4"), 0x05)]
+            input_b.name = "Input A1"
+            remote_duplicate = system.state.inputs[(HexBytes("00D4"), 0x20)]
+            remote_duplicate.name = "Input A1"
+            input_c = system.state.inputs[(HexBytes("6012"), 0x09)]
+            input_c.name = "Input C"
 
             selectors = system.all_inputs()
 
-            assert tuple(selector.name for selector in selectors) == ("Input A", "Input B")
-            assert tuple(selector.selector for selector in selectors) == (0x05, 0x09)
+            assert tuple(selector.name for selector in selectors) == (
+                "Input A1",
+                "Input A4",
+                "Input C",
+            )
+            assert tuple(selector.selector for selector in selectors) == (0x05, 0x03, 0x09)
             assert tuple(selector.input.device_id for selector in selectors) == (
                 HexBytes("00D4"),
+                HexBytes("00D4"),
                 HexBytes("6012"),
+            )
+
+            selectors_with_remote = system.all_inputs(include_remote=True)
+
+            assert tuple(selector.selector for selector in selectors_with_remote) == (
+                0x03,
+                0x05,
+                0x20,
+                0x09,
             )
         finally:
             system.shutdown()
@@ -765,7 +1210,7 @@ def test_all_inputs_returns_selectors_for_current_inputs() -> None:
 def test_system_maps_iterate_sorted_by_key() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             _ = system.state.devices[HexBytes("6012")]
             _ = system.state.devices[HexBytes("00D4")]
@@ -809,7 +1254,7 @@ def test_system_state_save_load_round_trips_json(tmp_path: Path) -> None:
         output.name = "Kitchen"
         output.on = True
         output.muted = False
-        output.source = 0x05
+        output.source_raw = 0x05
         output.volume = 0.5
         output.max_volume = 0.75
 
@@ -825,7 +1270,7 @@ def test_system_state_save_load_round_trips_json(tmp_path: Path) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data["devices"]["00D4"]["model_id"] == "B0"
         assert data["inputs"]["00D4:0x05"]["assigned_name"] == "A1"
-        assert data["outputs"]["1"]["source"] == 0x05
+        assert data["outputs"]["1"]["source_raw"] == 0x05
         assert data["outputs"]["1"]["max_volume"] == 0.75
         assert data["remote_inputs"]["3"]["present"] is True
         assert data["remote_inputs"]["3"]["source_index"] == 6
@@ -834,7 +1279,7 @@ def test_system_state_save_load_round_trips_json(tmp_path: Path) -> None:
 
         assert loaded.devices[HexBytes("00D4")].guid == GUID
         assert loaded.inputs[(HexBytes("00D4"), 0x05)].name == "A1"
-        assert loaded.outputs[1].source == 0x05
+        assert loaded.outputs[1].source_raw == 0x05
         assert loaded.outputs[1].max_volume == 0.75
         assert loaded.remote_inputs[3].present is True
         assert loaded.remote_inputs[3].device_guid == GUID
@@ -843,7 +1288,7 @@ def test_system_state_save_load_round_trips_json(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_system_state_load_accepts_legacy_hex_output_source(tmp_path: Path) -> None:
+def test_system_state_load_ignores_legacy_output_source(tmp_path: Path) -> None:
     async def scenario() -> None:
         path = tmp_path / "system-state.json"
         path.write_text(
@@ -866,9 +1311,38 @@ def test_system_state_load_accepts_legacy_hex_output_source(tmp_path: Path) -> N
 
         loaded = await SystemState.load_from_file(str(path))
 
-        assert loaded.outputs[1].source == 0x20
+        assert loaded.outputs[1].source_raw is None
 
     asyncio.run(scenario())
+
+
+def test_system_state_load_preserves_explicit_output_source_report() -> None:
+    state = SystemState.from_json(
+        {
+            "devices": {
+                "00D4": {
+                    "model_id": "B0",
+                    "outputs": [1],
+                    "guid": str(GUID),
+                },
+                "6012": {
+                    "model_id": "E9",
+                    "outputs": [9],
+                    "guid": "6c126887-df88-bd41-abbd-079c4e743694",
+                },
+            },
+            "outputs": {
+                "1": {
+                    "source_raw": 0xA0,
+                    "source_detail": [0x42],
+                },
+            },
+        }
+    )
+
+    local_output = state.outputs[1]
+    assert local_output.source_raw == 0xA0
+    assert local_output.source_detail == (0x42,)
 
 
 def test_system_state_merge_clears_explicit_remote_input_nulls() -> None:
@@ -897,7 +1371,7 @@ def test_system_state_merge_clears_explicit_remote_input_nulls() -> None:
 def test_system_wait_for_change_wakes_for_nested_state_updates() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             output = system.state.outputs[1]
             baseline_version = system.version
@@ -920,7 +1394,7 @@ def test_system_wait_for_change_wakes_for_nested_state_updates() -> None:
 def test_discover_remote_inputs_queries_all_slots_and_wakes_on_readbacks() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             async def complete_remote_input_discovery() -> None:
                 while not transport.sent:
@@ -964,7 +1438,7 @@ def test_discover_remote_inputs_queries_all_slots_and_wakes_on_readbacks() -> No
 def test_system_refreshes_on_connection_interrupted_event() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             transport.push(ConnectionInterrupted())
             await asyncio.sleep(0)
@@ -989,7 +1463,7 @@ def test_system_refreshes_on_connection_interrupted_event() -> None:
 def test_system_discovery_and_refresh_emit_only_read_ops() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         device = system.state.devices[HexBytes("00D4")]
         try:
             async def complete_device_discovery() -> None:
@@ -1019,7 +1493,7 @@ def test_discover_devices_uses_this_device_id_to_map_each_transport_host() -> No
     async def scenario() -> None:
         transport_200 = FakeTransport(host="10.1.0.200")
         transport_201 = FakeTransport(host="10.1.0.201")
-        system = System((transport_200, transport_201))  # type: ignore[arg-type]
+        system = System((transport_200, transport_201))
         try:
             async def complete_device_discovery() -> None:
                 while not transport_200.sent or not transport_201.sent:
@@ -1078,7 +1552,7 @@ def test_discover_devices_continues_when_only_host_ownership_is_missing() -> Non
         device_201.outputs = (9, 10)
         device_201.guid = UUID("6c126887-df88-bd41-abbd-079c4e743694")
         device_201.mac = HexBytes("ACE14F006012")
-        system = System((transport_200, transport_201), state=state)  # type: ignore[arg-type]
+        system = System((transport_200, transport_201), state=state)
         try:
             await asyncio.wait_for(
                 system.discover_devices(target_devices=2, time_between_probes_secs=0),
@@ -1117,7 +1591,7 @@ def test_discover_devices_waits_for_missing_multi_transport_hosts() -> None:
         device_201.outputs = (9, 10)
         device_201.guid = UUID("6c126887-df88-bd41-abbd-079c4e743694")
         device_201.mac = HexBytes("ACE14F006012")
-        system = System((transport_200, transport_201), state=state)  # type: ignore[arg-type]
+        system = System((transport_200, transport_201), state=state)
         try:
             async def complete_host_discovery() -> None:
                 while not transport_200.sent or not transport_201.sent:
@@ -1143,7 +1617,7 @@ def test_discover_devices_waits_for_missing_multi_transport_hosts() -> None:
 def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             device = system.state.devices[HexBytes("00D4")]
             device.outputs = (1, 2, 6, 7)
@@ -1206,7 +1680,7 @@ def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -
 def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             system.update(
                 RequestDeviceInformationCommandResponse(
@@ -1287,7 +1761,7 @@ def test_discover_inputs_uses_hardware_defaults_but_still_reads_runtime_names() 
 def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             system.update(
                 RequestDeviceInformationCommandResponse(
@@ -1361,7 +1835,7 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
 def test_discover_outputs_resolves_names_then_refreshes_missing_status() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             system.state.devices[HexBytes("6012")].outputs = (13, 14)
 
@@ -1411,7 +1885,7 @@ def test_discover_outputs_resolves_names_then_refreshes_missing_status() -> None
 def test_discover_outputs_wakes_when_transport_events_complete_state() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
-        system = System(transport)  # type: ignore[arg-type]
+        system = System(transport)
         try:
             system.state.devices[HexBytes("00D4")].outputs = (1,)
 
@@ -1435,7 +1909,7 @@ def test_discover_outputs_wakes_when_transport_events_complete_state() -> None:
             assert output.name == "Kitchen"
             assert output.on is True
             assert output.muted is False
-            assert output.source == 0x05
+            assert output.source_raw == 0x05
             assert output.volume == 0.5
             assert output.max_volume == 0.75
         finally:

@@ -1,13 +1,14 @@
 """Codec for encoding and decoding AMP commands."""
 
-from dataclasses import dataclass
-from typing import ClassVar
+from dataclasses import dataclass, fields, is_dataclass
+from types import MappingProxyType
+from typing import Any, ClassVar, cast
 from uuid import UUID
 
 from amp.byte_utils import HexBytes
 from amp.encoder import SubclassEncoder
 from amp.toggle_bool import ToggleBool
-from amp.transport import Transport
+from amp.transport import DEFAULT_CONNECTION_TIMEOUT_SECS, Transport
 
 ALL_OUTPUTS = 0xFF
 ALL_LOCAL_OUTPUTS = 0xFE
@@ -1201,12 +1202,33 @@ class CommandEncoder(SubclassEncoder[Command]):
         return super().decode(value)
 
 
+def _command_classes(cls: type[Command] = Command) -> tuple[type[Command], ...]:
+    found: list[type[Command]] = []
+    for subclass in cls.__subclasses__():
+        found.extend(_command_classes(subclass))
+        found.append(subclass)
+    return tuple(found)
+
+
+def _build_parameter_comments() -> MappingProxyType[str, str]:
+    comments: dict[str, str] = {}
+    for cls in _command_classes():
+        if not is_dataclass(cls):
+            continue
+        for field in fields(cast(Any, cls)):
+            comments[field.name] = field.name.replace("_", " ")
+    return MappingProxyType(comments)
+
+
+PARAMETER_COMMENTS = _build_parameter_comments()
+
+
 def connect(
     host: str,
     port: int = 17037,
     *,
     reconnection_wait_secs: float = 5.0,
-    connection_timeout_secs: float = 10.0,
+    connection_timeout_secs: float = DEFAULT_CONNECTION_TIMEOUT_SECS,
     trace: bool = False,
     read_only: bool = True,
 ) -> Transport[Command]:

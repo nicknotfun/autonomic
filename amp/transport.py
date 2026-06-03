@@ -1,4 +1,5 @@
 import asyncio
+from abc import ABC, abstractmethod
 from contextlib import suppress
 import logging
 from typing import (
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
+DEFAULT_CONNECTION_TIMEOUT_SECS = 0.25
 
 
 class Encoder(Protocol, Generic[T]):
@@ -24,6 +26,22 @@ class Encoder(Protocol, Generic[T]):
 
 class ConnectionInterrupted:
     pass
+
+
+class BaseTransport(ABC, Generic[T]):
+    host: str
+
+    @abstractmethod
+    def send(self, *ops: T) -> None: ...
+
+    @abstractmethod
+    def recv(self) -> AsyncGenerator[T | ConnectionInterrupted, None]: ...
+
+    @abstractmethod
+    def shutdown(self) -> None: ...
+
+    @abstractmethod
+    async def aclose(self) -> None: ...
 
 
 class TransportQueueClosed(Exception):
@@ -77,7 +95,7 @@ class TransportQueue(Generic[T]):
         return value
 
 
-class Transport(Generic[T]):
+class Transport(BaseTransport[T]):
     def __init__(
         self,
         encoder: Encoder[T],
@@ -85,7 +103,7 @@ class Transport(Generic[T]):
         port: int = 17037,
         *,
         reconnection_wait_secs: float = 5.0,
-        connection_timeout_secs: float = 10.0,
+        connection_timeout_secs: float = DEFAULT_CONNECTION_TIMEOUT_SECS,
         trace: bool = False,
     ) -> None:
         self.outbound: TransportQueue[T] = TransportQueue(encoder)
@@ -182,8 +200,13 @@ class Transport(Generic[T]):
         connected = False
         while True:
             try:
-                async with asyncio.timeout(self.connection_timeout_secs):
-                    reader, writer = await asyncio.open_connection(self.host, self.port)
+                try:
+                    async with asyncio.timeout(self.connection_timeout_secs):
+                        reader, writer = await asyncio.open_connection(self.host, self.port)
+                except (OSError, TimeoutError) as exc:
+                    logger.info("Connection attempt failed, retrying: %s", exc)
+                    await asyncio.sleep(self.reconnection_wait_secs)
+                    continue
                 self._writer = writer
                 connected = True
 

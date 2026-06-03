@@ -2,7 +2,13 @@ import asyncio
 
 import pytest
 
-from amp.transport import ConnectionInterrupted, Transport, TransportQueue, TransportQueueClosed
+from amp.transport import (
+    DEFAULT_CONNECTION_TIMEOUT_SECS,
+    ConnectionInterrupted,
+    Transport,
+    TransportQueue,
+    TransportQueueClosed,
+)
 
 
 class DummyEncoder:
@@ -107,6 +113,76 @@ def test_transport_send_starts_loop_and_queues_outbound_ops() -> None:
         assert await transport.outbound.pull() == ("second", b"second")
         transport.shutdown()
         await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_transport_default_connect_timeout_is_short_for_local_network() -> None:
+    transport = Transport(DummyEncoder(), "127.0.0.1")
+
+    assert transport.connection_timeout_secs == 0.25
+    assert transport.connection_timeout_secs == DEFAULT_CONNECTION_TIMEOUT_SECS
+
+
+def test_transport_retries_connect_oserror_and_preserves_outbound_ops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        attempts = 0
+        connected = asyncio.Event()
+        wrote = asyncio.Event()
+        never_read = asyncio.Event()
+        written: list[bytes] = []
+
+        class WaitingReader:
+            async def readuntil(self) -> bytes:
+                await never_read.wait()
+                return b""
+
+        class FakeWriter:
+            def write(self, data: bytes) -> None:
+                written.append(data)
+                wrote.set()
+
+            async def drain(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+            async def wait_closed(self) -> None:
+                pass
+
+        async def fake_open_connection(
+            host: str,
+            port: int,
+        ) -> tuple[WaitingReader, FakeWriter]:
+            nonlocal attempts
+            attempts += 1
+            assert host == "127.0.0.1"
+            assert port == 17037
+            if attempts == 1:
+                raise OSError("connect call failed")
+            connected.set()
+            return WaitingReader(), FakeWriter()
+
+        monkeypatch.setattr(asyncio, "open_connection", fake_open_connection)
+        transport = Transport(
+            DummyEncoder(),
+            "127.0.0.1",
+            reconnection_wait_secs=0,
+            connection_timeout_secs=0.25,
+        )
+        transport.send("first")
+        try:
+            await asyncio.wait_for(connected.wait(), timeout=1)
+            await asyncio.wait_for(wrote.wait(), timeout=1)
+
+            assert attempts == 2
+            assert written == [b"b'first'\r\n"]
+        finally:
+            transport.shutdown()
+            await asyncio.sleep(0)
 
     asyncio.run(scenario())
 

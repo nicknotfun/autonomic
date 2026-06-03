@@ -117,6 +117,7 @@ The maps preserve sorted iteration, so output is stable by device id,
 - source selector and device id
 - `assigned_name` from source-name rows
 - `hardware_name` from hardware metadata when available
+- hardware source kind and physical source id when model metadata is available
 - whether an assigned runtime name has actually been discovered
 
 Hardware names are only defaults. `InputState.name` dynamically returns
@@ -128,7 +129,15 @@ metadata.
 
 `OutputState` tracks:
 
-- output name, power, mute, selected source, volume, and maximum volume
+- output name, power, mute, volume, and maximum volume
+- raw source-selection readback bytes: the reported source byte and any extra
+  reported source bytes
+
+`OutputState` also has helpers for interpreting those raw source bytes, such as
+reported local and remote source selectors. Cross-state relationships, such as
+active sources and remote backing inputs, are derived at selector time from
+output, device, input, and remote-input state rather than copied into
+`OutputState`.
 
 `RemoteInput` tracks:
 
@@ -172,11 +181,17 @@ system.all_outputs().enable()
 system.all_outputs().set_input(system.input_by_name("W1"))
 ```
 
-`system.all_outputs()` sends one `FF` all-output command to each device
-transport, so a multi-device system gets one broadcast per connected device.
+`system.all_outputs()` operates on the canonical outputs already present in
+`system.state.outputs`; discovery and refresh helpers are responsible for
+populating that set.
+`OutputSelector.set_input()` resolves the source command for each target output:
+same-device inputs use the local selector, while cross-device inputs require a
+matching distributed source slot and raise `ValueError` when no route is known.
 
-`system.all_inputs()` returns a tuple of `InputSelector` objects for every input
-currently in `system.state.inputs`.
+`system.all_inputs()` returns non-remote `InputSelector` objects in physical
+source order by default. `system.input_by_name()` uses the same filtered view.
+Pass `include_remote=True` to include distributed source rows from
+`system.state.inputs`.
 
 Name lookups are case-insensitive and whitespace-insensitive:
 

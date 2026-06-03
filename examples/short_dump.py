@@ -30,27 +30,30 @@ def print_summary(system: System) -> None:
         print(label)
         print("  INPUTS")
         for input in system.inputs_by_device(device.id):
-            print(f"    {_input_label(input.selector):<6} {input.name}")
+            print(f"    {_input_label(input):<10} {input.name}")
         print("  OUTPUTS")
         for output_id in device.outputs or ():
             output = system.state.outputs[output_id]
             print(f"    {_output_row(system, output)}")
 
 
-def _input_label(selector: int) -> str:
-    return f"0x{selector:02X}"
+def _input_label(input) -> str:
+    if input.physical_source_id is not None:
+        return f"#{input.physical_source_id} (0x{input.selector:02X})"
+    return f"0x{input.selector:02X}"
 
 
 def _output_row(system: System, output: OutputState) -> str:
     source = "-"
-    if output.source is not None:
-        device = system.device_for_output(output.id)
-        input = (
-            system.input_for_device_selector(device.id, output.source)
-            if device is not None
-            else None
-        )
-        source = input.name if input is not None else f"0x{output.source:02X}"
+    output_selector = system.output(output.id)
+    try:
+        selected_input = output_selector.input
+    except ValueError:
+        selected_input = None
+    if selected_input is not None:
+        source = selected_input.name
+    elif output_selector.source is not None:
+        source = f"0x{output_selector.source:02X}"
     return (
         f"{output.id:<3} "
         f"name={_value(output.name):<18} "
