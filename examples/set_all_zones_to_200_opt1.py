@@ -23,9 +23,9 @@ def input_by_device_and_name(
     name: str,
 ) -> InputSelector:
     normalized_name = normalize_name(name)
-    for input in system.inputs_by_device(device_id):
+    for input in system.state.inputs_by_device(device_id):
         if normalize_name(input.name) == normalized_name:
-            return InputSelector(system, input.device_id, input.selector)
+            return system.input_by_id(input.device_id, input.selector)
     raise ValueError(f"Input {name!r} was not discovered on device {device_id}")
 
 

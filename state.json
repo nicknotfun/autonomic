@@ -1,30 +1,9 @@
 {
   "devices": {
-    "00D4": {
-      "version": 8,
-      "updated_at": "2026-06-03T00:37:14.765531Z",
-      "host": "10.1.0.200",
-      "firmware": 6,
-      "model_id": "B0",
-      "input_count": 8,
-      "output_count": 8,
-      "outputs": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8
-      ],
-      "mac": "ACE14F0055B4",
-      "guid": "674e1900-f8a9-f6be-a465-3d0fbee12977"
-    },
     "6012": {
-      "version": 8,
-      "updated_at": "2026-06-03T00:37:14.765895Z",
-      "host": "10.1.0.201",
+      "version": 7,
+      "updated_at": "2026-06-04T23:54:10.016979Z",
+      "host": null,
       "firmware": 8,
       "model_id": "E9",
       "input_count": 19,
@@ -44,780 +23,178 @@
     }
   },
   "inputs": {
-    "00D4:0x00": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766108Z",
-      "assigned_name": "COAX1",
-      "hidden_name": null,
-      "hardware_name": "COAX1",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 5
-    },
-    "00D4:0x01": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766288Z",
-      "assigned_name": "COAX2",
-      "hidden_name": null,
-      "hardware_name": "COAX2",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 6
-    },
-    "00D4:0x02": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766462Z",
-      "assigned_name": "W1",
-      "hidden_name": null,
-      "hardware_name": "OPT1",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 7
-    },
-    "00D4:0x03": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766626Z",
-      "assigned_name": "A4",
-      "hidden_name": null,
-      "hardware_name": "A4",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 4
-    },
-    "00D4:0x04": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766804Z",
-      "assigned_name": "W2",
-      "hidden_name": null,
-      "hardware_name": "OPT2",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 8
-    },
-    "00D4:0x05": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.766967Z",
-      "assigned_name": "A1",
-      "hidden_name": null,
-      "hardware_name": "A1",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 1
-    },
-    "00D4:0x06": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.767129Z",
-      "assigned_name": "A2",
-      "hidden_name": null,
-      "hardware_name": "A2",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 2
-    },
-    "00D4:0x07": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.767296Z",
-      "assigned_name": "A3",
-      "hidden_name": null,
-      "hardware_name": "A3",
-      "hardware_kind": "local",
-      "hardware_physical_source_id": 3
-    },
-    "00D4:0x20": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.767434Z",
-      "assigned_name": "W1",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x21": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.767580Z",
-      "assigned_name": "Player_A@ACE14F006012",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x22": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.767728Z",
-      "assigned_name": "W2",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x23": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.767868Z",
-      "assigned_name": "W3",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x24": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.768005Z",
-      "assigned_name": "W4",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x25": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.768142Z",
-      "assigned_name": "Passthrough In",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x26": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.768279Z",
-      "assigned_name": "Player_C@ACE14F006012",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
-    "00D4:0x27": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.768416Z",
-      "assigned_name": "Player_B@ACE14F006012",
-      "hidden_name": null,
-      "hardware_name": null,
-      "hardware_kind": null,
-      "hardware_physical_source_id": null
-    },
     "6012:0x00": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.768588Z",
-      "assigned_name": "Analog 2",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774163Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Analog 2",
       "hardware_kind": "local",
       "hardware_physical_source_id": 5
     },
     "6012:0x01": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.768765Z",
-      "assigned_name": "Analog 3",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774251Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Analog 3",
       "hardware_kind": "local",
       "hardware_physical_source_id": 6
     },
     "6012:0x02": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.768929Z",
-      "assigned_name": "Analog 4",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774347Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Analog 4",
       "hardware_kind": "local",
       "hardware_physical_source_id": 7
     },
     "6012:0x03": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.769092Z",
-      "assigned_name": "Analog 1",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774072Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Analog 1",
       "hardware_kind": "local",
       "hardware_physical_source_id": 4
     },
     "6012:0x04": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.769258Z",
-      "assigned_name": "Coaxial 1",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774434Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Coaxial 1",
       "hardware_kind": "local",
       "hardware_physical_source_id": 8
     },
     "6012:0x05": {
-      "version": 5,
-      "updated_at": "2026-06-03T00:37:14.769435Z",
-      "assigned_name": "Player_A",
-      "hidden_name": "Player_A@ACE14F006012",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.773782Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Player_A",
       "hardware_kind": "local",
       "hardware_physical_source_id": 1
     },
     "6012:0x06": {
-      "version": 5,
-      "updated_at": "2026-06-03T00:37:14.769605Z",
-      "assigned_name": "Player_B",
-      "hidden_name": "Player_B@ACE14F006012",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.773881Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Player_B",
       "hardware_kind": "local",
       "hardware_physical_source_id": 2
     },
     "6012:0x07": {
-      "version": 5,
-      "updated_at": "2026-06-03T00:37:14.769786Z",
-      "assigned_name": "Player_C",
-      "hidden_name": "Player_C@ACE14F006012",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.773979Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Player_C",
       "hardware_kind": "local",
       "hardware_physical_source_id": 3
     },
     "6012:0x08": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.769951Z",
-      "assigned_name": "Coaxial 2",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774521Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Coaxial 2",
       "hardware_kind": "local",
       "hardware_physical_source_id": 9
     },
     "6012:0x09": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770118Z",
-      "assigned_name": "W3",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774606Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Optical 1",
       "hardware_kind": "local",
       "hardware_physical_source_id": 10
     },
     "6012:0x0A": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770281Z",
-      "assigned_name": "W4",
+      "version": 3,
+      "updated_at": "2026-06-04T23:54:09.774693Z",
+      "assigned_name": null,
       "hidden_name": null,
       "hardware_name": "Optical 2",
       "hardware_kind": "local",
       "hardware_physical_source_id": 11
     },
     "6012:0x0B": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770448Z",
-      "assigned_name": "Casting_1",
-      "hidden_name": "Casting_1@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.774774Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_1",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x0C": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770618Z",
-      "assigned_name": "Casting_2",
-      "hidden_name": "Casting_2@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.774855Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_2",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x0D": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770797Z",
-      "assigned_name": "Casting_3",
-      "hidden_name": "Casting_3@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.774942Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_3",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x0E": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.770971Z",
-      "assigned_name": "Casting_4",
-      "hidden_name": "Casting_4@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.775026Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_4",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x0F": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.771133Z",
-      "assigned_name": "Casting_5",
-      "hidden_name": "Casting_5@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.775104Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_5",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x50": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.771293Z",
-      "assigned_name": "Casting_6",
-      "hidden_name": "Casting_6@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.775182Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_6",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x51": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.771460Z",
-      "assigned_name": "Casting_7",
-      "hidden_name": "Casting_7@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.775259Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_7",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     },
     "6012:0x52": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.771621Z",
-      "assigned_name": "Casting_8",
-      "hidden_name": "Casting_8@ACE14F006012",
+      "version": 2,
+      "updated_at": "2026-06-04T23:54:09.775348Z",
+      "assigned_name": null,
+      "hidden_name": null,
       "hardware_name": "Casting_8",
       "hardware_kind": "casting",
       "hardware_physical_source_id": null
     }
   },
-  "outputs": {
-    "1": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.771857Z",
-      "name": "Kitchen",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "2": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772041Z",
-      "name": "Dining",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "3": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772217Z",
-      "name": "Living",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "4": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772399Z",
-      "name": "Master",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "5": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772575Z",
-      "name": "Bathroom",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "6": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772762Z",
-      "name": "Foyer",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "7": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.772935Z",
-      "name": "Sitting",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "8": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.773108Z",
-      "name": "Passthrough",
-      "on": true,
-      "muted": false,
-      "source_raw": 130,
-      "source_detail": [
-        32
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "9": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.773279Z",
-      "name": "Grill",
-      "on": true,
-      "muted": false,
-      "source_raw": 131,
-      "source_detail": [
-        37
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "10": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.773455Z",
-      "name": "Patio West",
-      "on": true,
-      "muted": false,
-      "source_raw": 131,
-      "source_detail": [
-        37
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "11": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.773627Z",
-      "name": "Patio East",
-      "on": true,
-      "muted": false,
-      "source_raw": 131,
-      "source_detail": [
-        37
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "12": {
-      "version": 7,
-      "updated_at": "2026-06-03T00:37:14.773813Z",
-      "name": "Pool",
-      "on": true,
-      "muted": false,
-      "source_raw": 131,
-      "source_detail": [
-        37
-      ],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "13": {
-      "version": 6,
-      "updated_at": "2026-06-03T00:37:14.773980Z",
-      "name": "",
-      "on": true,
-      "muted": false,
-      "source_raw": 160,
-      "source_detail": [],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "14": {
-      "version": 6,
-      "updated_at": "2026-06-03T00:37:14.774144Z",
-      "name": "",
-      "on": true,
-      "muted": false,
-      "source_raw": 160,
-      "source_detail": [],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "15": {
-      "version": 6,
-      "updated_at": "2026-06-03T00:37:14.774312Z",
-      "name": "",
-      "on": true,
-      "muted": false,
-      "source_raw": 160,
-      "source_detail": [],
-      "volume": 0.5,
-      "max_volume": 1.0
-    },
-    "16": {
-      "version": 6,
-      "updated_at": "2026-06-03T00:37:14.774487Z",
-      "name": "",
-      "on": true,
-      "muted": false,
-      "source_raw": 160,
-      "source_detail": [],
-      "volume": 0.5,
-      "max_volume": 1.0
-    }
-  },
-  "remote_inputs": {
-    "0": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.774670Z",
-      "present": true,
-      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
-      "source_index": 6,
-      "name": "W1"
-    },
-    "1": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.774836Z",
-      "present": true,
-      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
-      "source_index": 0,
-      "name": "Player_A@ACE14F006012"
-    },
-    "2": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.774985Z",
-      "present": true,
-      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
-      "source_index": 7,
-      "name": "W2"
-    },
-    "3": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.775138Z",
-      "present": true,
-      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
-      "source_index": 9,
-      "name": "W3"
-    },
-    "4": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.775292Z",
-      "present": true,
-      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
-      "source_index": 10,
-      "name": "W4"
-    },
-    "5": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.775446Z",
-      "present": true,
-      "device_guid": "6c126887-df88-bd41-abbd-079c4e743694",
-      "source_index": 3,
-      "name": "Passthrough In"
-    },
-    "6": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.775594Z",
-      "present": true,
-      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
-      "source_index": 2,
-      "name": "Player_C@ACE14F006012"
-    },
-    "7": {
-      "version": 4,
-      "updated_at": "2026-06-03T00:37:14.775753Z",
-      "present": true,
-      "device_guid": "8768126c-88df-41bd-abbd-079c4e743694",
-      "source_index": 1,
-      "name": "Player_B@ACE14F006012"
-    },
-    "8": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.775877Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "9": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776000Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "10": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776130Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "11": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776258Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "12": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776381Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "13": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776508Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "14": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776632Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "15": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776766Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "16": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.776888Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "17": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777010Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "18": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777133Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "19": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777260Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "20": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777384Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "21": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777506Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "22": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777633Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "23": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777764Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "24": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.777892Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "25": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778014Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "26": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778140Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "27": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778266Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "28": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778394Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "29": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778520Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "30": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778644Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    },
-    "31": {
-      "version": 1,
-      "updated_at": "2026-06-03T00:37:14.778779Z",
-      "present": false,
-      "device_guid": null,
-      "source_index": null,
-      "name": null
-    }
-  }
+  "outputs": {},
+  "remote_inputs": {}
 }

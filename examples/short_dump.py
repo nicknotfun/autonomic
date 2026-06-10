@@ -29,7 +29,7 @@ def print_summary(system: System) -> None:
             label += f" ({device.host})"
         print(label)
         print("  INPUTS")
-        for input in system.inputs_by_device(device.id):
+        for input in system.state.inputs_by_device(device.id):
             print(f"    {_input_label(input):<10} {input.name}")
         print("  OUTPUTS")
         for output_id in device.outputs or ():

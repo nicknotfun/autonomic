@@ -39,7 +39,6 @@ from amp.system import (
     PHYSICAL_SOURCE_ID_BY_LOGICAL_SELECTOR,
     REMOTE_INPUT_SLOT_IDS,
     DeviceState,
-    InputSelector,
     InputState,
     OutputState,
     RemoteInput,
@@ -356,7 +355,7 @@ def test_system_derives_remote_source_backing_source_when_available() -> None:
             assert output.remote_source_selector == 0x20
             assert output.local_source_selector is None
             assert output.selected_reported_source_selector == 0x20
-            assert system.output_remote_source(output) is None
+            assert system.state.output_remote_source(output) is None
 
             output.name = "Kitchen"
             output.on = True
@@ -382,7 +381,7 @@ def test_system_derives_remote_source_backing_source_when_available() -> None:
 
             assert output.source_raw == 0x20
             assert output.source_detail == ()
-            remote_source = system.output_remote_source(output)
+            remote_source = system.state.output_remote_source(output)
 
             assert remote_source == system.state.remote_inputs[0]
             assert output_selector.remote_source is not None
@@ -849,7 +848,7 @@ def test_selector_commands_emit_typed_codec_ops_for_all_outputs() -> None:
                 ),
                 (
                     SourceSelectionCommand(output=2, source=0x02),
-                    SourceSelectionCommand(output=10, source=0x20, detail=(0x42,)),
+                    SourceSelectionCommand(output=10, source=0x20),
                 ),
             ]
             assert all(
@@ -903,13 +902,46 @@ def test_output_selector_set_input_routes_local_and_remote_sources() -> None:
 
             assert transport.sent == [
                 (SourceSelectionCommand(output=1, source=0x02),),
-                (SourceSelectionCommand(output=9, source=0x24, detail=(0x42,)),),
+                (SourceSelectionCommand(output=9, source=0x24),),
             ]
         finally:
             system.shutdown()
             await asyncio.sleep(0)
 
     asyncio.run(scenario())
+
+
+def test_source_selection_command_for_remote_input_uses_selector_for_target_device() -> None:
+    state = SystemState()
+    source_device = state.devices[HexBytes("00D4")]
+    source_device.outputs = (1,)
+    source_device.guid = GUID
+    source_device.model_id = HexBytes("B0")
+    target_device = state.devices[HexBytes("6012")]
+    target_device.outputs = (9,)
+    target_device.guid = OTHER_GUID
+    target_device.model_id = HexBytes("E9")
+    state.apply_hardware_defaults()
+    _ = state.outputs[1]
+    _ = state.outputs[9]
+
+    remote_w1 = state.remote_inputs[0]
+    remote_w1.present = True
+    remote_w1.device_guid = GUID
+    remote_w1.source_index = 6
+    remote_w1.name = "W1"
+
+    remote_input = state.inputs[(HexBytes("00D4"), 0x20)]
+    remote_input.name = "W1"
+
+    assert state.source_selection_command_for_input(
+        1,
+        remote_input,
+    ) == SourceSelectionCommand(output=1, source=0x02)
+    assert state.source_selection_command_for_input(
+        9,
+        remote_input,
+    ) == SourceSelectionCommand(output=9, source=0x20)
 
 
 def test_output_selector_set_input_rejects_missing_remote_mapping() -> None:
@@ -1034,10 +1066,15 @@ def test_device_selector_outputs_returns_only_canonical_outputs() -> None:
             else:
                 raise AssertionError("unknown device selector should not create state")
 
+            input_state = system.state.inputs[(HexBytes("00D4"), 0x05)]
+            input_selector = system.input_by_id(HexBytes("00D4"), 0x05)
+
+            assert input_selector.input == input_state
+
             try:
-                InputSelector(system, HexBytes("00D4"), 0x05)
+                system.input_by_id(HexBytes("00D4"), 0x06)
             except ValueError as exc:
-                assert "00D4:0x05" in str(exc)
+                assert "00D4:0x06" in str(exc)
             else:
                 raise AssertionError("unknown input selector should not create state")
         finally:
@@ -1614,6 +1651,62 @@ def test_discover_devices_waits_for_missing_multi_transport_hosts() -> None:
     asyncio.run(scenario())
 
 
+def test_discover_total_timeout_interrupts_long_probe_wait() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            try:
+                await asyncio.wait_for(
+                    system.discover(
+                        target_devices=1,
+                        time_between_probes_secs=30,
+                        timeout_secs=0.01,
+                    ),
+                    timeout=1,
+                )
+            except TimeoutError:
+                elapsed = loop.time() - started_at
+            else:
+                raise AssertionError("discovery should time out without device responses")
+
+            assert elapsed < 0.5
+            assert transport.sent
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_discover_remains_cancellable_by_external_wait_for() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            try:
+                await asyncio.wait_for(
+                    system.discover(target_devices=1, time_between_probes_secs=30),
+                    timeout=0.01,
+                )
+            except TimeoutError:
+                elapsed = loop.time() - started_at
+            else:
+                raise AssertionError("external wait_for should cancel discovery")
+
+            assert elapsed < 0.5
+            assert transport.sent
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_discover_inputs_scans_device_outputs_and_infers_missing_input_count() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
@@ -1823,7 +1916,7 @@ def test_discover_inputs_retries_known_incomplete_hardware_tables() -> None:
             )
 
             assert source_name_probe_count() == 2
-            assert len(system.discovered_inputs_by_device(HexBytes("00D4"))) == 8
+            assert len(system.state.discovered_inputs_by_device(HexBytes("00D4"))) == 8
             assert system.state.inputs[(HexBytes("00D4"), 0x04)].name == "OPT2"
         finally:
             system.shutdown()

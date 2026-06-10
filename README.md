@@ -55,13 +55,24 @@ row = encoder.encode(VolumeCommand(output=1, volume=0.5))
 print(row)  # 040150
 ```
 
-Open a direct amplifier transport:
+Open a direct amplifier transport from an active asyncio event loop:
 
 ```python
+import asyncio
+
 from amp.codec import VolumeCommand, connect
 
-transport = connect("10.1.0.200")
-transport.send(VolumeCommand(output=1))
+
+async def main() -> None:
+    transport = connect("10.1.0.200")
+    try:
+        transport.send(VolumeCommand(output=1))
+        await asyncio.sleep(1)
+    finally:
+        await transport.aclose()
+
+
+asyncio.run(main())
 ```
 
 `CommandEncoder(read_only=True)` is the default, so write-like commands are filtered
@@ -77,8 +88,8 @@ from amp.system import System
 
 async def main() -> None:
     async with System(("10.1.0.200", "10.1.0.201")) as system:
-        await system.discover(target_devices=2)
-        system.dump()
+        await system.discover(target_devices=2, timeout_secs=10)
+        system.state.dump()
 
 
 asyncio.run(main())
@@ -149,7 +160,9 @@ with `SystemState.load_from_file()`.
 ## Discovery
 
 `System.discover()` first discovers devices, then runs input, output, and remote
-source discovery concurrently.
+source discovery concurrently. Pass `timeout_secs` to bound the complete
+workflow; `time_between_probes_secs` controls only the wait between individual
+probe rounds.
 
 Device discovery uses read/query rows to find device ids, device metadata, MACs,
 GUIDs, output ownership, and transport host ownership.

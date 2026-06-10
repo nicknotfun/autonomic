@@ -37,7 +37,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from amp.byte_utils import HexBytes
 import amp.codec as codec
 from amp.codec import Command, CommandEncoder
-from amp.system import InputSelector, System
+from amp.system import System
 from amp.toggle_bool import ToggleBool
 
 
@@ -400,7 +400,6 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                     codec.NetworkSettingsDeviceGuidRequestCommand(device_id=device_id),
                     codec.KeypadPortZoneMappingCommand(device_id=device_id),
                     codec.KeypadPortOccupancyCommand(device_id=device_id),
-                    codec.KeypadPortOccupancyCommandResponse(device_id=device_id),
                 )
             ),
         )
@@ -616,7 +615,9 @@ def output_snapshot(system: System) -> dict[str, dict[str, Any]]:
             "name": output.name,
             "on": output.on,
             "muted": output.muted,
-            "source": output.source,
+            "source_raw": output.source_raw,
+            "source_detail": output.source_detail,
+            "selected_source": output.selected_reported_source_selector,
             "volume": output.volume,
             "max_volume": output.max_volume,
         }
@@ -672,15 +673,16 @@ async def run_selector_noop_writes(hosts: tuple[str, ...], args: argparse.Namesp
                 attempts.append(
                     {"output": output_id, "action": "set_max_volume", "value": output.max_volume}
                 )
-            if output.source is not None:
-                device = system.device_for_output(output_id)
+            selected_source = output.selected_reported_source_selector
+            if selected_source is not None:
+                device = system.state.device_for_output(output_id)
                 source = (
-                    system.input_for_device_selector(device.id, output.source)
+                    system.state.inputs.get((device.id, selected_source))
                     if device is not None
                     else None
                 )
                 if source is not None:
-                    selector.set_input(InputSelector(system, source.device_id, source.selector))
+                    selector.set_input(system.input_by_id(source.device_id, source.selector))
                     attempts.append(
                         {
                             "output": output_id,

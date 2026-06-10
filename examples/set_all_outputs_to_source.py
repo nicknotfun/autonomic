@@ -15,7 +15,7 @@ def select_input(system: System, source_name: str | None) -> InputSelector:
         first_input = next(iter(system.state.inputs.values()))
     except StopIteration as exc:
         raise ValueError("No inputs were discovered") from exc
-    return InputSelector(system, first_input.device_id, first_input.selector)
+    return system.input_by_id(first_input.device_id, first_input.selector)
 
 
 async def async_main() -> None:
