@@ -5,7 +5,7 @@ import asyncio
 
 from _system_example import add_connection_args, discover_or_timeout, selected_hosts
 
-from amp.system import OutputState, System
+from amp.system import OutputSelector, OutputState, System
 
 
 async def async_main() -> None:
@@ -45,7 +45,7 @@ def _input_label(input) -> str:
 
 def _output_row(system: System, output: OutputState) -> str:
     source = "-"
-    output_selector = system.output(output.id)
+    output_selector = OutputSelector(system, output.id)
     try:
         selected_input = output_selector.input
     except ValueError:

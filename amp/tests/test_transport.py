@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from amp.byte_utils import HexBytes
 from amp.transport import (
     DEFAULT_CONNECTION_TIMEOUT_SECS,
     ConnectionInterrupted,
@@ -12,12 +13,12 @@ from amp.transport import (
 
 
 class DummyEncoder:
-    def encode(self, value: str) -> bytes | None:
+    def encode(self, value: str) -> HexBytes | None:
         if value == "skip":
             return None
         if value == "first-copy":
-            return b"first"
-        return value.encode("ascii")
+            return HexBytes.from_utf8("first")
+        return HexBytes.from_utf8(value)
 
     def decoder(self, value: bytes) -> str:
         return value.decode("ascii")
@@ -179,7 +180,7 @@ def test_transport_retries_connect_oserror_and_preserves_outbound_ops(
             await asyncio.wait_for(wrote.wait(), timeout=1)
 
             assert attempts == 2
-            assert written == [b"b'first'\r\n"]
+            assert written == [b"6669727374\r\n"]
         finally:
             transport.shutdown()
             await asyncio.sleep(0)

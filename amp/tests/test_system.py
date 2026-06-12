@@ -1,8 +1,11 @@
 import asyncio
+import importlib
 import json
 from pathlib import Path
 from typing import AsyncGenerator
 from uuid import UUID
+
+import pytest
 
 from amp.byte_utils import HexBytes
 from amp.codec import (
@@ -580,6 +583,70 @@ def test_generic_device_id_readbacks_do_not_assign_transport_host() -> None:
             device = system.state.devices[HexBytes("6012")]
             assert device.host is None
             assert device.outputs == (9, 10)
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_zone_assignment_does_not_overwrite_existing_device_host() -> None:
+    async def scenario() -> None:
+        transport_201 = FakeTransport(host="10.1.0.201")
+        system = System(transport_201)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.host = "10.1.0.200"
+
+            transport_201.push(
+                RequestZoneAssignmentsCommandResponse(
+                    device_id=HexBytes("00D4"),
+                    zones=(1, 2),
+                )
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert device.host == "10.1.0.200"
+            assert device.outputs == (1, 2)
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_zone_assignment_does_not_assign_transport_claimed_by_another_device() -> None:
+    async def scenario() -> None:
+        transport_200 = FakeTransport(host="10.1.0.200")
+        transport_201 = FakeTransport(host="10.1.0.201")
+        system = System((transport_200, transport_201))
+        try:
+            system.state.devices[HexBytes("6012")].host = "10.1.0.201"
+            device_200 = system.state.devices[HexBytes("00D4")]
+
+            transport_201.push(
+                RequestZoneAssignmentsCommandResponse(
+                    device_id=HexBytes("00D4"),
+                    zones=(1, 2),
+                )
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert device_200.host is None
+            assert device_200.outputs == (1, 2)
+
+            transport_200.push(
+                RequestZoneAssignmentsCommandResponse(
+                    device_id=HexBytes("00D4"),
+                    zones=(1, 2),
+                )
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert device_200.host == "10.1.0.200"
         finally:
             system.shutdown()
             await asyncio.sleep(0)
@@ -1242,6 +1309,36 @@ def test_all_inputs_returns_non_remote_selectors_in_physical_order() -> None:
             await asyncio.sleep(0)
 
     asyncio.run(scenario())
+
+
+def test_short_dump_print_summary_tolerates_partial_output_state(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    examples_dir = Path(__file__).resolve().parents[2] / "examples"
+    monkeypatch.syspath_prepend(str(examples_dir))
+    short_dump = importlib.import_module("short_dump")
+
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.host = "10.1.0.200"
+            device.outputs = (1,)
+            system.state.outputs[1].name = "Kitchen"
+
+            short_dump.print_summary(system)
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+    output = capsys.readouterr().out
+    assert "00D4 (10.1.0.200)" in output
+    assert "name=Kitchen" in output
+    assert "source=-" in output
 
 
 def test_system_maps_iterate_sorted_by_key() -> None:

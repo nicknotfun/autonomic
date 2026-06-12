@@ -618,7 +618,7 @@ class LinkZonesCommand(OutputCommand):
     members: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return False
+        return bool(self.members) or self.flags not in (None, 0x20)
 
 
 @dataclass(kw_only=True, frozen=True)

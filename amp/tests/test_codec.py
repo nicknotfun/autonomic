@@ -366,6 +366,7 @@ def test_command_encoder_filters_writes_only_in_read_only_mode() -> None:
     assert str(read_only_encoder.encode(StandbyPowerCommand())) == "01FF"
     assert read_only_encoder.encode(StandbyPowerCommand(is_on=ToggleBool.On)) is None
     assert read_only_encoder.encode(VolumeUpCommand(output=1)) is None
+    assert read_only_encoder.encode(LinkZonesCommand(output=1, flags=3, members=(2, 3))) is None
     assert str(CommandEncoder(read_only=False).encode(StandbyPowerCommand(is_on=ToggleBool.On))) == "01FF01"
 
 
@@ -436,6 +437,7 @@ def test_read_patterns_encode_in_read_only_mode(op: Command, encoded: str) -> No
             "2901050000014131",
         ),
         (AudioDelayCommand(output=1, delay=0x14), "310114"),
+        (LinkZonesCommand(output=1, flags=3, members=(2, 3)), "3001030203"),
         (SourceGainCommand(output=1, source_selector=2, gains=(0.5,)), "32010209"),
         (ZoneGainCommand(output=1, gain=2), "440102"),
         (

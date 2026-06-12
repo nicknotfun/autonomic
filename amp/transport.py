@@ -20,7 +20,8 @@ DEFAULT_CONNECTION_TIMEOUT_SECS = 0.25
 
 
 class Encoder(Protocol, Generic[T]):
-    def encode(self, value: T) -> bytes | None: ...
+    def encode(self, value: T) -> HexBytes | None: ...
+
     def decoder(self, value: bytes) -> T | None: ...
 
 
@@ -50,9 +51,9 @@ class TransportQueueClosed(Exception):
 
 class TransportQueue(Generic[T]):
     def __init__(self, encoder: Encoder[Any]) -> None:
-        self._queue: asyncio.Queue[tuple[T, bytes] | None] = asyncio.Queue()
-        self._incomplete: list[tuple[T, bytes]] = []
-        self._queued_encoded: set[bytes] = set()
+        self._queue: asyncio.Queue[tuple[T, HexBytes] | None] = asyncio.Queue()
+        self._incomplete: list[tuple[T, HexBytes]] = []
+        self._queued_encoded: set[HexBytes] = set()
         self._closed = False
         self.encoder = encoder
 
@@ -62,12 +63,12 @@ class TransportQueue(Generic[T]):
         self._closed = True
         self._queue.put_nowait(None)
 
-    def _encode(self, value: T) -> bytes | None:
+    def _encode(self, value: T) -> HexBytes | None:
         if isinstance(value, ConnectionInterrupted):
-            return b""
+            return HexBytes("")
         return self.encoder.encode(value)
 
-    def push(self, value: T, *, encoded: bytes | None = None) -> None:
+    def push(self, value: T, *, encoded: HexBytes | None = None) -> None:
         if self._closed:
             raise TransportQueueClosed
         if not value:
@@ -85,7 +86,7 @@ class TransportQueue(Generic[T]):
         _, encoded = self._incomplete.pop(0)
         self._queued_encoded.discard(encoded)
 
-    async def pull(self) -> tuple[T, bytes]:
+    async def pull(self) -> tuple[T, HexBytes]:
         if self._incomplete:
             return self._incomplete[0]
         value = await self._queue.get()
@@ -240,7 +241,7 @@ class Transport(BaseTransport[T]):
                         raise
 
                 read_task = asyncio.create_task(pull_inbound())
-                pull_task: asyncio.Task[tuple[T, bytes]] | None = None
+                pull_task: asyncio.Task[tuple[T, HexBytes]] | None = None
                 try:
                     while True:
                         pull_task = asyncio.create_task(outbound.pull())
@@ -257,7 +258,7 @@ class Transport(BaseTransport[T]):
                             raise ConnectionError("connection closed")
 
                         op, encoded = pull_task.result()
-                        self._trace(f"--> {encoded.hex()}: {op}")
+                        self._trace(f"--> {encoded}: {op}")
                         writer.write(str(encoded).encode("ascii") + b"\r\n")
                         await writer.drain()
                         outbound.task_done()
