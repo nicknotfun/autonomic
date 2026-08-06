@@ -41,13 +41,9 @@ from amp.system import System
 from amp.toggle_bool import ToggleBool
 
 
-# These defaults match the two-device system currently documented in
-# PROTOCOL.md. The probe still expands the sets from live responses, but seeding
-# them makes the later phases robust when one discovery query is missed by a
-# device or by the shared diagnostic bus.
-DEFAULT_HOSTS = ("10.1.0.200", "10.1.0.201")
-KNOWN_DEVICE_IDS = (HexBytes("00D4"), HexBytes("6012"))
-KNOWN_OUTPUTS = tuple(range(1, 17))
+# These defaults match the current local stack documented in PROTOCOL.md. Pass
+# --host explicitly when probing another installation.
+DEFAULT_HOSTS = ("10.1.0.109", "10.1.0.200")
 REMOTE_SLOTS = tuple(range(0x20))
 
 
@@ -69,7 +65,7 @@ def op_fields(op: Command) -> dict[str, Any]:
     """Return dataclass fields for an op with JSON-friendly scalar values."""
 
     try:
-        data = asdict(op)  # type: ignore[arg-type]
+        data = asdict(op)  # type: ignore[call-overload]
     except TypeError:
         # This is defensive; current Command implementations are dataclasses when
         # they have fields, but keeping this tolerant helps future experiments.
@@ -263,9 +259,9 @@ def unique_ops(ops: Iterable[Command]) -> tuple[Command, ...]:
 
 
 def discovered_device_ids(ops: Iterable[Command]) -> tuple[HexBytes, ...]:
-    """Return known plus live-discovered device ids."""
+    """Return device ids actually observed in live responses."""
 
-    ids = set(KNOWN_DEVICE_IDS)
+    ids: set[HexBytes] = set()
     for op in ops:
         if isinstance(op, codec.DeviceIdCommand):
             ids.add(op.device_id)
@@ -273,9 +269,9 @@ def discovered_device_ids(ops: Iterable[Command]) -> tuple[HexBytes, ...]:
 
 
 def discovered_outputs(ops: Iterable[Command]) -> tuple[int, ...]:
-    """Return known plus live-discovered output ids."""
+    """Return output ids actually observed in live responses."""
 
-    outputs = set(KNOWN_OUTPUTS)
+    outputs: set[int] = set()
     for op in ops:
         if isinstance(op, (codec.RequestDeviceInformationCommandResponse, codec.RequestZoneAssignmentsCommandResponse)):
             outputs.update(op.zones)
@@ -283,48 +279,17 @@ def discovered_outputs(ops: Iterable[Command]) -> tuple[int, ...]:
 
 
 def discovered_selectors(ops: Iterable[Command]) -> tuple[int, ...]:
-    """Return known plus live-discovered source selectors.
+    """Return source selectors actually observed in live responses."""
 
-    The seed includes M6250 local/remote selectors and MA6 local/casting
-    selectors. Live source-name and source-status rows can add anything missing.
-    """
-
-    selectors = {
-        0x00,
-        0x01,
-        0x02,
-        0x03,
-        0x04,
-        0x05,
-        0x06,
-        0x07,
-        0x08,
-        0x09,
-        0x0A,
-        0x0B,
-        0x0C,
-        0x0D,
-        0x0E,
-        0x0F,
-        0x20,
-        0x21,
-        0x22,
-        0x23,
-        0x24,
-        0x25,
-        0x26,
-        0x27,
-        0x50,
-        0x51,
-        0x52,
-    }
+    selectors: set[int] = set()
     for op in ops:
         if isinstance(op, codec.SourceNameOptionsCommand):
             selectors.add(op.source_selector)
         elif isinstance(op, codec.SourceSelectionCommand) and op.source is not None:
             # Status rows can set bit 7. System state clears it before comparing
             # selectors, so the probe summary does the same.
-            selectors.add(op.source & 0x7F)
+            for source in (op.source, *op.detail):
+                selectors.add(source & 0x7F)
         elif isinstance(op, codec.SourceGainCommand) and op.source_selector is not None:
             selectors.add(op.source_selector)
     return tuple(sorted(selectors))
@@ -448,7 +413,7 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
             ),
         )
 
-        # Phase 5: metadata reads for currently-selected sources. The MA6/M6250
+        # Phase 5: metadata reads for currently-selected sources. The amplifier
         # stack tends to answer only when metadata is available, so absence of a
         # row is recorded as "no response" rather than as a decode failure.
         current_selectors = sorted(

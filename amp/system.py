@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable
+from os import PathLike
 from typing import Any, Literal, TypeAlias, TypeVar, cast, overload, override
 from uuid import UUID
 
@@ -211,6 +212,205 @@ class System(VersionTrackerMixin):
     def apply_hardware_defaults(self) -> None:
         """Apply model catalog defaults to canonical system state."""
         self.state.apply_hardware_defaults()
+
+    async def save_state(self, file_path: str | PathLike[str]) -> None:
+        """Save the currently discovered system state as JSON.
+
+        Call :meth:`discover` first when the file will be used as a configuration
+        backup so names, source options, and output settings are complete.
+
+        Args:
+            file_path: Destination JSON path.
+        """
+        await self.state.save_to_file(file_path)
+
+    async def restore_state(
+        self,
+        file_path: str | PathLike[str],
+        *,
+        neutral_volume: float = 0.5,
+    ) -> None:
+        """Restore tracked configuration and leave outputs in a neutral state.
+
+        The restore whitelist contains source names/options, zone names, and
+        maximum volume. Saved power, source, mute, and volume are deliberately
+        ignored. Each restored output is muted during the operation, set to the
+        requested neutral volume, and finally unmuted. The protocol has no safe
+        no-source value, so source selection is left unchanged.
+
+        Device identity fields and distributed-source slots are retained in the
+        JSON snapshot for discovery/reference but are not written. Remote slot
+        writes require ownership information that the current state model does
+        not retain.
+
+        Args:
+            file_path: Source JSON path previously written by :meth:`save_state`.
+            neutral_volume: Final output volume in the inclusive range 0.0 to 1.0.
+
+        Raises:
+            ValueError: If the snapshot cannot be safely applied to the current
+                discovered topology or contains incomplete write data.
+        """
+        saved_state = await SystemState.load_from_file(file_path)
+        restore_ops = self._state_restore_ops(
+            saved_state,
+            neutral_volume=neutral_volume,
+        )
+        self.send_ops(*restore_ops)
+
+    def _state_restore_ops(
+        self,
+        saved_state: SystemState,
+        *,
+        neutral_volume: float,
+    ) -> tuple[Command, ...]:
+        """Validate a saved state and build its complete write plan."""
+        errors: list[str] = []
+        if not 0.0 <= neutral_volume <= 1.0:
+            errors.append("neutral_volume must be between 0.0 and 1.0")
+
+        current_devices: dict[HexBytes, DeviceState] = {}
+        for device_id, saved_device in saved_state.devices.items():
+            current_device = self.state.devices.get(device_id)
+            if current_device is None:
+                errors.append(f"saved device {device_id} is not present")
+                continue
+            current_devices[device_id] = current_device
+            if (
+                saved_device.guid is not None
+                and current_device.guid is not None
+                and saved_device.guid != current_device.guid
+            ):
+                errors.append(f"saved device {device_id} has a different GUID")
+            if len(self.transports) > 1 and self.transport_for_device(current_device) is None:
+                errors.append(f"current device {device_id} has no transport mapping")
+
+        target_outputs: dict[int, OutputState] = {}
+        for output_id, saved_output in saved_state.outputs.items():
+            current_output = self.state.outputs.get(output_id)
+            if current_output is None:
+                errors.append(f"saved output {output_id} is not present")
+                continue
+            saved_output_device = saved_state.device_for_output(output_id)
+            current_output_device = self.state.device_for_output(output_id)
+            if saved_output_device is None:
+                errors.append(f"saved output {output_id} has no owning device")
+                continue
+            if current_output_device is None:
+                errors.append(f"current output {output_id} has no owning device")
+                continue
+            if saved_output_device.id != current_output_device.id:
+                errors.append(
+                    f"saved output {output_id} belongs to device {saved_output_device.id}, "
+                    f"not current device {current_output_device.id}"
+                )
+                continue
+            if saved_output.max_volume is not None and not 0.0 <= saved_output.max_volume <= 1.0:
+                errors.append(f"saved output {output_id} has invalid maximum volume")
+            target_outputs[output_id] = current_output
+
+        source_restore_ops: list[Command] = []
+        for input_key, saved_input in saved_state.inputs.items():
+            has_write_data = any(
+                value is not None
+                for value in (
+                    saved_input.options,
+                    saved_input.hidden_name,
+                    saved_input.assigned_name,
+                )
+            )
+            if not has_write_data:
+                continue
+            if saved_input.options is None and (
+                saved_input.hidden_name is not None or saved_input.assigned_name is not None
+            ):
+                errors.append(
+                    f"saved input {saved_input.qualified_name} has a name but no options bytes"
+                )
+                continue
+            if saved_input.options is not None and len(saved_input.options) != 3:
+                errors.append(
+                    f"saved input {saved_input.qualified_name} option bytes must be 3 bytes"
+                )
+                continue
+            if input_key not in self.state.inputs:
+                errors.append(f"saved input {saved_input.qualified_name} is not present")
+                continue
+            current_device = current_devices.get(saved_input.device_id)
+            if current_device is None:
+                errors.append(
+                    f"saved input {saved_input.qualified_name} has no current device"
+                )
+                continue
+            representative_output = next(
+                (
+                    output_id
+                    for output_id in current_device.outputs or ()
+                    if output_id in self.state.outputs
+                ),
+                None,
+            )
+            if representative_output is None:
+                errors.append(
+                    f"saved input {saved_input.qualified_name} has no current device output"
+                )
+                continue
+            source_restore_ops.append(
+                codec.SourceNameOptionsCommand(
+                    output=representative_output,
+                    source_selector=saved_input.selector,
+                    options=saved_input.options,
+                    hidden_name=saved_input.hidden_name,
+                    name=saved_input.assigned_name,
+                )
+            )
+
+        if errors:
+            raise ValueError("Cannot restore state: " + "; ".join(errors))
+
+        output_ids = tuple(target_outputs)
+        mute_first_ops: list[Command] = [
+            codec.MuteCommand(output=output_id, is_muted=ToggleBool.On)
+            for output_id in output_ids
+        ]
+        output_configuration_ops: list[Command] = []
+        for output_id, saved_output in saved_state.outputs.items():
+            if saved_output.name is not None:
+                output_configuration_ops.append(
+                    codec.ZoneNameCommand(output=output_id, name=saved_output.name)
+                )
+            if saved_output.max_volume is not None:
+                output_configuration_ops.append(
+                    codec.MaximumVolumeCommand(
+                        output=output_id,
+                        max_volume=saved_output.max_volume,
+                    )
+                )
+
+        neutral_volume_ops: list[Command] = []
+        for output_id, current_output in target_outputs.items():
+            detail: tuple[int, ...] = ()
+            if current_output.volume_detail:
+                detail = (round(neutral_volume * 200),)
+            neutral_volume_ops.append(
+                codec.VolumeCommand(
+                    output=output_id,
+                    volume=neutral_volume,
+                    detail=detail,
+                )
+            )
+
+        unmute_last_ops: list[Command] = [
+            codec.MuteCommand(output=output_id, is_muted=ToggleBool.Off)
+            for output_id in output_ids
+        ]
+        return (
+            *mute_first_ops,
+            *source_restore_ops,
+            *output_configuration_ops,
+            *neutral_volume_ops,
+            *unmute_last_ops,
+        )
 
     def transport_for_device(self, device: DeviceState) -> BaseTransport[Command] | None:
         """Find the transport associated with a discovered device.
@@ -872,9 +1072,18 @@ class System(VersionTrackerMixin):
             OutputSelector for the matching output.
         """
         normalized_name = _normalize_name(name)
-        for output in self.state.outputs.values():
-            if output.name is not None and _normalize_name(output.name) == normalized_name:
-                return OutputSelector(self, output.id)
+        matches = tuple(
+            output
+            for output in self.state.outputs.values()
+            if output.name and _normalize_name(output.name) == normalized_name
+        )
+        if len(matches) > 1:
+            candidates = ", ".join(str(output.id) for output in matches)
+            raise ValueError(
+                f"Output name {name!r} is ambiguous; candidate output ids: {candidates}"
+            )
+        if matches:
+            return OutputSelector(self, matches[0].id)
         raise ValueError(f"Output with name {name} not found")
 
     @overload
@@ -939,19 +1148,37 @@ class System(VersionTrackerMixin):
             remote_inputs = tuple(
                 input_state for input_state in self.state.inputs.values() if input_state.remote
             )
-            inputs = (
-                (*remote_inputs, *listed_inputs)
+            input_groups: tuple[tuple[InputState, ...], ...] = (
+                (remote_inputs, listed_inputs)
                 if prefer_remote
-                else (*listed_inputs, *remote_inputs)
+                else (listed_inputs, remote_inputs)
             )
         else:
-            inputs = listed_inputs
-        for input_state in inputs:
-            if _normalize_name(input_state.name) == normalized_name or (
-                include_hardware_names
-                and input_state.hardware_name is not None
-                and _normalize_name(input_state.hardware_name) == normalized_name
-            ):
+            input_groups = (listed_inputs,)
+
+        for input_group in input_groups:
+            matches = tuple(
+                input_state
+                for input_state in input_group
+                if _normalize_name(input_state.name) == normalized_name
+            )
+            if not matches and include_hardware_names:
+                matches = tuple(
+                    input_state
+                    for input_state in input_group
+                    if input_state.hardware_name is not None
+                    and _normalize_name(input_state.hardware_name) == normalized_name
+                )
+            if len(matches) > 1:
+                candidates = ", ".join(
+                    input_state.qualified_name for input_state in matches
+                )
+                raise ValueError(
+                    f"Input name {name!r} is ambiguous; candidates: {candidates}. "
+                    "Use input_by_id(device_id, selector) to choose one."
+                )
+            if matches:
+                input_state = matches[0]
                 return InputSelector(self, input_state.device_id, input_state.selector)
         raise ValueError(f"Input with name {name} not found")
 

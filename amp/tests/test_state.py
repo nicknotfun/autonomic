@@ -64,7 +64,9 @@ def test_system_state_json_round_trips_inputs_outputs_and_devices() -> None:
     reloaded = SystemState.from_json(state.to_json())
 
     assert reloaded.devices[HexBytes("00D4")].outputs == (1,)
-    assert reloaded.inputs[(HexBytes("00D4"), 0x02)].name == "W1"
+    reloaded_input = reloaded.inputs[(HexBytes("00D4"), 0x02)]
+    assert reloaded_input.name == "W1"
+    assert reloaded_input.options == HexBytes("000001")
     assert reloaded.outputs[1].source_raw == 0x02
 
 

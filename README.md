@@ -87,7 +87,7 @@ from amp.system import System
 
 
 async def main() -> None:
-    async with System(("10.1.0.200", "10.1.0.201")) as system:
+    async with System(("10.1.0.109", "10.1.0.200")) as system:
         await system.discover(target_devices=2, timeout_secs=10)
         system.state.dump()
 
@@ -126,6 +126,7 @@ The maps preserve sorted iteration, so output is stable by device id,
 `InputState` tracks:
 
 - source selector and device id
+- exact source option bytes required to write the source row back safely
 - `assigned_name` from source-name rows
 - `hardware_name` from hardware metadata when available
 - hardware source kind and physical source id when model metadata is available
@@ -140,7 +141,8 @@ metadata.
 
 `OutputState` tracks:
 
-- output name, power, mute, volume, and maximum volume
+- output name, power, mute, volume (including extended-volume detail), and
+  maximum volume
 - raw source-selection readback bytes: the reported source byte and any extra
   reported source bytes
 
@@ -154,8 +156,36 @@ output, device, input, and remote-input state rather than copied into
 
 - slot presence, backing device GUID, backing source index, and display name
 
-System state can be serialized with `SystemState.save_to_file()` and restored
-with `SystemState.load_from_file()`.
+`SystemState.save_to_file()` and `SystemState.load_from_file()` serialize the
+in-memory view. The `System` client adds configuration backup and hardware
+restore methods:
+
+```python
+async with System(("10.1.0.200", "10.1.0.201")) as system:
+    await system.discover(target_devices=2, timeout_secs=10)
+    await system.save_state("state.json")
+
+async with System(
+    ("10.1.0.200", "10.1.0.201"),
+    read_only=False,
+) as system:
+    await system.discover(target_devices=2, timeout_secs=10)
+    await system.restore_state("state.json")
+```
+
+`restore_state()` validates device and output ownership before sending anything.
+It restores the tracked writable configuration: source names with their exact
+option bytes, output names, and maximum volumes. It never writes device identity
+or GUID fields, and it does not replay saved power, volume, mute, or selected
+source state. Instead, it temporarily mutes each restored output, sets its final
+volume to `0.5`, then unmutes it; power is left unchanged.
+
+There is no documented no-source selector: an omitted source is a query and
+`00` is a real local input. Restore therefore leaves the selected source
+unchanged. Distributed-source definitions remain in the JSON for reference but
+are not written because the current state model does not retain per-device slot
+ownership. Other codec-level settings not tracked by `SystemState` are likewise
+outside this restore operation.
 
 ## Discovery
 
@@ -212,6 +242,12 @@ Name lookups are case-insensitive and whitespace-insensitive:
 system.input_by_name(" player c ")
 system.output_by_name("patio west")
 ```
+
+Assigned input names take precedence over model-derived hardware aliases.
+Lookups raise `ValueError` when multiple local (or multiple remote) inputs share
+the same name, or when multiple outputs share a name, instead of selecting an
+arbitrary device. Use `input_by_id(device_id, selector)` or `output(output_id)`
+to disambiguate.
 
 ## Hardware Metadata
 

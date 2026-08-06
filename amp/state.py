@@ -1,4 +1,5 @@
 import json
+from os import PathLike
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -120,6 +121,7 @@ LOGICAL_SELECTOR_BY_PHYSICAL_SOURCE_ID = {
 class InputState(VersionedState):
     device_id: HexBytes
     selector: int
+    options: HexBytes | None = None
     assigned_name: str | None = None
     hidden_name: str | None = None
     hardware_name: str | None = None
@@ -221,6 +223,8 @@ class InputState(VersionedState):
 
     def update(self, op: SourceNameOptionsCommand) -> None:
         """Merge a source-name response into this input."""
+        if op.options is not None:
+            self.options = op.options
         if op.name is None:
             return
         self.assigned_name = op.name
@@ -245,6 +249,7 @@ class OutputState(VersionedState):
     source_raw: int | None = None
     source_detail: tuple[int, ...] = ()
     volume: float | None = None
+    volume_detail: tuple[int, ...] = ()
     max_volume: float | None = None
 
     @staticmethod
@@ -381,6 +386,7 @@ class OutputState(VersionedState):
             case codec.VolumeCommand():
                 if op.volume is not None:
                     self.volume = op.volume
+                    self.volume_detail = op.detail
             case codec.MaximumVolumeCommand():
                 if op.max_volume is not None:
                     self.max_volume = op.max_volume
@@ -504,13 +510,13 @@ class SystemState(VersionTrackerMixin):
         state.apply_hardware_defaults()
         return state
 
-    async def save_to_file(self, file_path: str) -> None:
+    async def save_to_file(self, file_path: str | PathLike[str]) -> None:
         """Write this state to a JSON file."""
         payload = json.dumps(self.to_json(), indent=2)
         Path(file_path).write_text(payload, encoding="utf-8")
 
     @classmethod
-    async def load_from_file(cls, file_path: str) -> "SystemState":
+    async def load_from_file(cls, file_path: str | PathLike[str]) -> "SystemState":
         """Read system state from a JSON file.
 
         Returns:

@@ -234,6 +234,10 @@ has both local and distributed IDs. Source-name rows may expose newer eSeries
 selectors outside the original local/distributed ranges, such as casting
 selectors `50`-`52`.
 
+No no-source selector is documented. Omitting the source byte makes `03` a read
+request, while `00` selects a real local input; clients must not invent a clear
+value from output sentinels such as `FC` or `FF`.
+
 ### M6250 Observed Hardware Sources
 
 | Selector | Default label |
@@ -276,9 +280,11 @@ tables accepted `20`-`27`.
 
 ## Observed Stack
 
-Read-only probes against `10.1.0.200:17037` and `10.1.0.201:17037` observed:
+Read-only probes against `10.1.0.109:17037` and `10.1.0.200:17037` observed:
 
 | Device | Device ID | Model | Firmware | Outputs | MAC | GUID |
 | --- | --- | --- | --- | --- | --- | --- |
 | M6250 | `00D4` | `B0` | `06` | `01`-`08` | `ACE14F0055B4` | `674e1900-f8a9-f6be-a465-3d0fbee12977` |
-| MA6 | `6012` | `E9` | `08` | `09`-`10` hex | `ACE14F006012` | `6c126887-df88-bd41-abbd-079c4e743694` |
+| M6250 | `00DC` | `B0` | `06` | `09`-`10` hex | `ACE14F0055BC` | `ed6cd4b9-60a8-e845-b485-ace14f0055bc` |
+
+The MA6 source table above is retained from earlier hardware captures.

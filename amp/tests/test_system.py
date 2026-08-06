@@ -1268,6 +1268,51 @@ def test_by_name_selectors_ignore_case_and_whitespace() -> None:
     asyncio.run(scenario())
 
 
+def test_by_name_selectors_reject_ambiguous_names_and_prefer_assigned_names() -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            first_a1 = system.state.inputs[(HexBytes("00D4"), 0x05)]
+            first_a1.assigned_name = "A1"
+            second_a1 = system.state.inputs[(HexBytes("00DC"), 0x05)]
+            second_a1.assigned_name = "A1"
+
+            with pytest.raises(ValueError, match="ambiguous") as exc_info:
+                system.input_by_name("a1")
+            assert "00D4:1" in str(exc_info.value)
+            assert "00DC:1" in str(exc_info.value)
+
+            hardware_alias = system.state.inputs[(HexBytes("00D4"), 0x02)]
+            hardware_alias.assigned_name = "W1"
+            hardware_alias.hardware_name = "OPT1"
+            assigned_name = system.state.inputs[(HexBytes("00DC"), 0x02)]
+            assigned_name.assigned_name = "OPT1"
+            assigned_name.hardware_name = "OPT1"
+
+            selected = system.input_by_name("opt1")
+            assert selected.input.device_id == HexBytes("00DC")
+
+            first_output = system.state.outputs[1]
+            first_output.name = "Patio"
+            second_output = system.state.outputs[9]
+            second_output.name = "Patio"
+            blank_output = system.state.outputs[10]
+            blank_output.name = ""
+
+            with pytest.raises(ValueError, match="ambiguous") as output_exc:
+                system.output_by_name("patio")
+            assert "1, 9" in str(output_exc.value)
+
+            with pytest.raises(ValueError, match="not found"):
+                system.output_by_name("")
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_all_inputs_returns_non_remote_selectors_in_physical_order() -> None:
     async def scenario() -> None:
         transport = FakeTransport()
@@ -1477,6 +1522,230 @@ def test_system_state_load_preserves_explicit_output_source_report() -> None:
     local_output = state.outputs[1]
     assert local_output.source_raw == 0xA0
     assert local_output.source_detail == (0x42,)
+
+
+def test_system_save_state_writes_the_full_current_snapshot(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            device = system.state.devices[HexBytes("00D4")]
+            device.host = transport.host
+            device.outputs = (1,)
+            source = system.state.inputs[(device.id, 0x05)]
+            source.options = HexBytes("490000")
+            source.assigned_name = "Player"
+            source.hidden_name = "Legacy Player"
+            output = system.state.outputs[1]
+            output.name = "Kitchen"
+            output.on = True
+            output.muted = True
+            output.source_raw = 0x05
+            output.volume = 0.25
+            output.max_volume = 0.75
+            remote_input = system.state.remote_inputs[3]
+            remote_input.present = True
+            remote_input.device_guid = GUID
+            remote_input.source_index = 1
+            remote_input.name = "Remote Player"
+
+            path = tmp_path / "saved-state.json"
+            await system.save_state(path)
+
+            expected_json = json.loads(json.dumps(system.state.to_json()))
+            assert json.loads(path.read_text(encoding="utf-8")) == expected_json
+            assert transport.sent == []
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_system_restore_state_applies_configuration_and_neutralizes_outputs(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        saved = SystemState()
+        saved_200 = saved.devices[HexBytes("00D4")]
+        saved_200.host = "10.1.0.201"
+        saved_200.outputs = (1,)
+        saved_201 = saved.devices[HexBytes("6012")]
+        saved_201.host = "10.1.0.200"
+        saved_201.outputs = (9,)
+
+        saved_source_200 = saved.inputs[(saved_200.id, 0x05)]
+        saved_source_200.options = HexBytes("490000")
+        saved_source_200.assigned_name = ""
+        saved_source_200.hidden_name = ""
+        saved_source_201 = saved.inputs[(saved_201.id, 0x02)]
+        saved_source_201.options = HexBytes("000001")
+        saved_source_201.assigned_name = "Streamer"
+        saved_source_201.hidden_name = "Old Streamer"
+
+        saved_remote_source = saved.inputs[(saved_200.id, 0x20)]
+        saved_remote_source.options = HexBytes("490000")
+        saved_remote_source.assigned_name = "Remote Alias"
+        # Distributed source slot definitions are retained only as reference data.
+        saved_remote_input = saved.remote_inputs[3]
+        saved_remote_input.present = True
+        saved_remote_input.device_guid = GUID
+        saved_remote_input.source_index = 1
+        saved_remote_input.name = "Remote Player"
+
+        output_200 = saved.outputs[1]
+        output_200.name = "Kitchen"
+        output_200.on = True
+        output_200.muted = True
+        output_200.source_raw = 0x05
+        output_200.volume = 0.125
+        output_200.max_volume = 0.75
+        output_201 = saved.outputs[9]
+        output_201.name = ""
+        output_201.on = False
+        output_201.muted = True
+        output_201.source_raw = 0x02
+        output_201.volume = 0.875
+        output_201.max_volume = 0.625
+
+        path = tmp_path / "saved-state.json"
+        await saved.save_to_file(path)
+
+        transport_200 = FakeTransport(host="10.1.0.200")
+        transport_201 = FakeTransport(host="10.1.0.201")
+        system = System((transport_200, transport_201))
+        try:
+            current_200 = system.state.devices[HexBytes("00D4")]
+            current_200.host = transport_200.host
+            current_200.outputs = (1,)
+            current_201 = system.state.devices[HexBytes("6012")]
+            current_201.host = transport_201.host
+            current_201.outputs = (9,)
+            _ = system.state.inputs[(current_200.id, 0x05)]
+            _ = system.state.inputs[(current_200.id, 0x20)]
+            _ = system.state.inputs[(current_201.id, 0x02)]
+            system.state.outputs[1].update(
+                VolumeCommand(output=1, volume=0.2, detail=(42,))
+            )
+            system.state.outputs[9].update(VolumeCommand(output=9, volume=0.3))
+
+            await system.restore_state(path)
+
+            sent_200 = [op for batch in transport_200.sent for op in batch]
+            assert sent_200[0] == MuteCommand(output=1, is_muted=ToggleBool.On)
+            assert sent_200[-1] == MuteCommand(output=1, is_muted=ToggleBool.Off)
+            expected_configuration_200 = (
+                ZoneNameCommand(output=1, name="Kitchen"),
+                MaximumVolumeCommand(output=1, max_volume=0.75),
+                SourceNameOptionsCommand(
+                    output=1,
+                    source_selector=0x05,
+                    options=HexBytes("490000"),
+                    hidden_name="",
+                    name="",
+                ),
+                SourceNameOptionsCommand(
+                    output=1,
+                    source_selector=0x20,
+                    options=HexBytes("490000"),
+                    name="Remote Alias",
+                ),
+                VolumeCommand(output=1, volume=0.5, detail=(100,)),
+            )
+            assert len(sent_200) == len(expected_configuration_200) + 2
+            assert all(op in sent_200[1:-1] for op in expected_configuration_200)
+
+            sent_201 = [op for batch in transport_201.sent for op in batch]
+            assert sent_201[0] == MuteCommand(output=9, is_muted=ToggleBool.On)
+            assert sent_201[-1] == MuteCommand(output=9, is_muted=ToggleBool.Off)
+            expected_configuration_201 = (
+                ZoneNameCommand(output=9, name=""),
+                MaximumVolumeCommand(output=9, max_volume=0.625),
+                SourceNameOptionsCommand(
+                    output=9,
+                    source_selector=0x02,
+                    options=HexBytes("000001"),
+                    hidden_name="Old Streamer",
+                    name="Streamer",
+                ),
+                VolumeCommand(output=9, volume=0.5),
+            )
+            assert len(sent_201) == len(expected_configuration_201) + 2
+            assert all(op in sent_201[1:-1] for op in expected_configuration_201)
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_system_restore_state_rejects_missing_source_options_before_writes(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        saved = SystemState()
+        device = saved.devices[HexBytes("00D4")]
+        device.outputs = (1,)
+        saved.outputs[1].name = "Kitchen"
+        valid_source = saved.inputs[(device.id, 0x05)]
+        valid_source.options = HexBytes("490000")
+        valid_source.assigned_name = "Player"
+        invalid_source = saved.inputs[(device.id, 0x06)]
+        invalid_source.assigned_name = "Tuner"
+        path = tmp_path / "saved-state.json"
+        await saved.save_to_file(path)
+
+        transport = FakeTransport()
+        system = System(transport)
+        try:
+            current_device = system.state.devices[device.id]
+            current_device.host = transport.host
+            current_device.outputs = (1,)
+            _ = system.state.outputs[1]
+            _ = system.state.inputs[(current_device.id, 0x05)]
+            _ = system.state.inputs[(current_device.id, 0x06)]
+
+            with pytest.raises(ValueError, match="option"):
+                await system.restore_state(path)
+
+            assert transport.sent == []
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_system_restore_state_rejects_topology_mismatch_before_writes(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        saved = SystemState()
+        saved_device = saved.devices[HexBytes("00D4")]
+        saved_device.outputs = (2,)
+        saved.outputs[2].name = "Kitchen"
+        path = tmp_path / "saved-state.json"
+        await saved.save_to_file(path)
+
+        transport_200 = FakeTransport(host="10.1.0.200")
+        transport_201 = FakeTransport(host="10.1.0.201")
+        system = System((transport_200, transport_201))
+        try:
+            current_device = system.state.devices[saved_device.id]
+            current_device.host = transport_200.host
+            current_device.outputs = (1,)
+            _ = system.state.outputs[1]
+
+            with pytest.raises(ValueError, match="topology|output"):
+                await system.restore_state(path)
+
+            assert transport_200.sent == []
+            assert transport_201.sent == []
+        finally:
+            system.shutdown()
+            await asyncio.sleep(0)
+
+    asyncio.run(scenario())
 
 
 def test_system_state_merge_clears_explicit_remote_input_nulls() -> None:
