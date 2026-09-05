@@ -455,6 +455,62 @@ class SystemState(VersionTrackerMixin):
         self.remote_inputs = TrackedDict[int, RemoteInput](
             lambda remote_input_id: RemoteInput(id=remote_input_id), tracker=self
         )
+        self.remote_inputs_by_device = TrackedDict[tuple[HexBytes, int], RemoteInput](
+            lambda key: RemoteInput(id=key[1]), tracker=self
+        )
+
+    def remote_input_for_device(
+        self, device_id: HexBytes | None, slot_id: int
+    ) -> RemoteInput | None:
+        """Resolve a slot in its receiving amplifier's table.
+
+        Old snapshots without ownership retain their legacy global lookup. Once
+        any owned tables exist, a missing owner must not borrow another table.
+        """
+        if self.remote_inputs_by_device:
+            if device_id is None:
+                return None
+            return self.remote_inputs_by_device.get((device_id, slot_id))
+        return self.remote_inputs.get(slot_id)
+
+    def remote_table_for_device(self, device_id: HexBytes) -> tuple[RemoteInput, ...]:
+        """Return only the slot definitions usable by the receiving amplifier."""
+        if self.remote_inputs_by_device:
+            return tuple(
+                slot for (owner, _), slot in self.remote_inputs_by_device.items()
+                if owner == device_id
+            )
+        return tuple(self.remote_inputs.values())
+
+    def update_remote_input(
+        self, device_id: HexBytes, op: codec.DistributedSourceDefinitionSlotCommand
+    ) -> None:
+        """Store a device-owned response and refresh the compatibility view."""
+        if op.slot_id is None:
+            return
+        self.remote_inputs_by_device[(device_id, op.slot_id)].update(op)
+        self._update_remote_consensus(op.slot_id)
+
+    def _update_remote_consensus(self, slot_id: int) -> None:
+        """Expose an unscoped slot only when all observed owner rows agree."""
+        slots = [
+            slot for (_, index), slot in self.remote_inputs_by_device.items()
+            if index == slot_id
+        ]
+        if not slots:
+            return
+        definitions = {
+            (slot.present, slot.device_guid, slot.source_index, slot.name)
+            for slot in slots
+        }
+        target = self.remote_inputs[slot_id]
+        if len(definitions) == 1:
+            target.merge(slots[0])
+        else:
+            target.present = None
+            target.device_guid = None
+            target.source_index = None
+            target.name = None
 
     def to_json(self) -> dict[str, Any]:
         """Serialize system state to a JSON-compatible dictionary.
@@ -480,6 +536,12 @@ class SystemState(VersionTrackerMixin):
             "remote_inputs": {
                 remote_input_id: remote_input.model_dump(mode="json", exclude={"id"})
                 for remote_input_id, remote_input in self.remote_inputs.items()
+            },
+            "remote_inputs_by_device": {
+                f"{device_id}:0x{slot_id:02X}": slot.model_dump(
+                    mode="json", exclude={"id"}
+                )
+                for (device_id, slot_id), slot in self.remote_inputs_by_device.items()
             },
         }
 
@@ -507,6 +569,14 @@ class SystemState(VersionTrackerMixin):
             state.remote_inputs[remote_input_id].merge(
                 RemoteInput(id=remote_input_id, **remote_input_data)
             )
+        for key, slot_data in data.get("remote_inputs_by_device", {}).items():
+            device_id_str, slot_id_str = key.split(":")
+            slot_id = int(slot_id_str, 0)
+            state.remote_inputs_by_device[(HexBytes(device_id_str), slot_id)].merge(
+                RemoteInput(id=slot_id, **slot_data)
+            )
+        for _, slot_id in state.remote_inputs_by_device:
+            state._update_remote_consensus(slot_id)
         state.apply_hardware_defaults()
         return state
 
@@ -536,6 +606,10 @@ class SystemState(VersionTrackerMixin):
             self.outputs[output_id].merge(other_output)
         for remote_input_id, other_remote_input in other.remote_inputs.items():
             self.remote_inputs[remote_input_id].merge(other_remote_input)
+        for key, other_remote_input in other.remote_inputs_by_device.items():
+            self.remote_inputs_by_device[key].merge(other_remote_input)
+        for slot_id in {key[1] for key in self.remote_inputs_by_device}:
+            self._update_remote_consensus(slot_id)
 
     def apply_hardware_defaults(self) -> None:
         """Apply model catalog defaults to devices and local inputs."""
@@ -704,7 +778,10 @@ class SystemState(VersionTrackerMixin):
         if remote_source_selector is None:
             return None
         remote_slot_id = remote_source_selector - REMOTE_SOURCE_SELECTOR_MIN
-        remote_input = self.remote_inputs.get(remote_slot_id)
+        device = self.device_for_output(output.id)
+        remote_input = self.remote_input_for_device(
+            None if device is None else device.id, remote_slot_id
+        )
         if remote_input is None or not remote_input.present:
             return None
         return remote_input
@@ -794,7 +871,7 @@ class SystemState(VersionTrackerMixin):
             otherwise remote-source command using the distributed selector.
         """
         remote_slot_id = source_input.selector - REMOTE_SOURCE_SELECTOR_MIN
-        remote_input = self.remote_inputs.get(remote_slot_id)
+        remote_input = self.remote_input_for_device(source_input.device_id, remote_slot_id)
         if remote_input is None or not remote_input.present:
             raise ValueError(
                 f"Cannot route remote input {source_input.qualified_name} ({source_input.name}) "
@@ -813,7 +890,27 @@ class SystemState(VersionTrackerMixin):
 
         return codec.SourceSelectionCommand(
             output=output_id,
-            source=source_input.selector,
+            source=self._remote_selector_for_backing(
+                target_device, remote_input.device_guid, remote_input.source_index
+            ),
+        )
+
+    def _remote_selector_for_backing(
+        self, target_device: DeviceState, guid: UUID | None, source_index: int | None
+    ) -> int:
+        """Locate backing audio in the destination's own distributed table."""
+        if guid is not None and source_index is not None:
+            source_guids = _guid_candidates(guid)
+            for slot in self.remote_table_for_device(target_device.id):
+                if (
+                    slot.present
+                    and slot.source_index == source_index
+                    and slot.device_guid in source_guids
+                ):
+                    return REMOTE_SOURCE_SELECTOR_MIN + slot.id
+        raise ValueError(
+            f"No distributed source mapping on device {target_device.id} "
+            f"for backing GUID {guid} source index {source_index}"
         )
 
     def remote_selector_for_input(
@@ -851,17 +948,13 @@ class SystemState(VersionTrackerMixin):
                 f"{output_id} on device {target_device.id}: input has no physical source id"
             )
         source_index = physical_source_id - 1
-        source_guids = _guid_candidates(source_device.guid)
-        for remote_slot_id, remote_input in sorted(self.remote_inputs.items()):
-            if (
-                remote_input.present
-                and remote_input.source_index == source_index
-                and remote_input.device_guid in source_guids
-            ):
-                return REMOTE_SOURCE_SELECTOR_MIN + remote_slot_id
-
-        raise ValueError(
-            f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
-            f"{output_id} on device {target_device.id}: no distributed source mapping "
-            f"for source device {source_device.id} physical input {physical_source_id}"
-        )
+        try:
+            return self._remote_selector_for_backing(
+                target_device, source_device.guid, source_index
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Cannot route input {source_input.qualified_name} ({source_input.name}) to output "
+                f"{output_id} on device {target_device.id}: no distributed source mapping "
+                f"for source device {source_device.id} physical input {physical_source_id}"
+            ) from exc

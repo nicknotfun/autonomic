@@ -239,9 +239,8 @@ class System(VersionTrackerMixin):
         no-source value, so source selection is left unchanged.
 
         Device identity fields and distributed-source slots are retained in the
-        JSON snapshot for discovery/reference but are not written. Remote slot
-        writes require ownership information that the current state model does
-        not retain.
+        JSON snapshot for discovery/reference but are deliberately outside the
+        restore whitelist, including snapshots with per-device slot ownership.
 
         Args:
             file_path: Source JSON path previously written by :meth:`save_state`.
@@ -256,6 +255,12 @@ class System(VersionTrackerMixin):
             saved_state,
             neutral_volume=neutral_volume,
         )
+        # Validate with the production encoder even when custom transports do
+        # not encode. A malformed later row must not leave an earlier mute or
+        # rename queued without the final unmute.
+        encoder = codec.CommandEncoder(read_only=False)
+        for op in restore_ops:
+            encoder.encode(op)
         self.send_ops(*restore_ops)
 
     def _state_restore_ops(
@@ -504,6 +509,7 @@ class System(VersionTrackerMixin):
         if transport is not None:
             routed_ops = [op for op in ops if transport in self._target_transports_for_op(op)]
             if routed_ops:
+                transport.validate_send(*routed_ops)
                 transport.send(*routed_ops)
             return
 
@@ -511,6 +517,8 @@ class System(VersionTrackerMixin):
         for op in ops:
             for target_transport in self._target_transports_for_op(op):
                 ops_by_transport[target_transport].append(op)
+        for target_transport, transport_ops in ops_by_transport.items():
+            target_transport.validate_send(*transport_ops)
         for target_transport, transport_ops in ops_by_transport.items():
             target_transport.send(*transport_ops)
 
@@ -569,7 +577,8 @@ class System(VersionTrackerMixin):
         """Resolve devices likely associated with a transport-originated event.
 
         Returns:
-            Devices assigned to the transport, or a single inferred unhosted device.
+            Devices assigned to the transport, or the sole device in a
+            single-transport system when its host is not yet known.
         """
         devices = tuple(
             device for device in self.state.devices.values() if device.host == transport.host
@@ -580,7 +589,7 @@ class System(VersionTrackerMixin):
         unhosted_devices = tuple(
             device for device in self.state.devices.values() if device.host is None
         )
-        if len(unhosted_devices) == 1:
+        if len(self.transports) == 1 and len(self.state.devices) == 1 and len(unhosted_devices) == 1:
             device = unhosted_devices[0]
             device.host = transport.host
             return (device,)
@@ -612,6 +621,8 @@ class System(VersionTrackerMixin):
             devices = self._devices_for_transport_event(transport)
             if devices:
                 return devices
+            if len(self.transports) > 1:
+                return ()
 
         devices = tuple(self.state.devices.values())
         if len(devices) == 1:
@@ -649,7 +660,21 @@ class System(VersionTrackerMixin):
                 if not self._apply_device_host_info(op):
                     self._pending_device_host_info.append(op)
             case codec.DistributedSourceDefinitionSlotCommand(slot_id=int(slot_id)):
-                self.state.remote_inputs[slot_id].update(op)
+                if transport is None:
+                    self.state.remote_inputs[slot_id].update(op)
+                else:
+                    owners = self._devices_for_transport_event(transport)
+                    if len(owners) == 1:
+                        self.state.update_remote_input(owners[0].id, op)
+                        if isinstance(op, codec.DistributedSourceDefinitionUnusedCommand):
+                            key = (owners[0].id, REMOTE_SOURCE_SELECTOR_MIN + slot_id)
+                            if key in self.state.inputs:
+                                del self.state.inputs[key]
+                                self.state.inputs.mark_updated()
+                    elif not owners and len(self.transports) == 1 and not self.state.remote_inputs_by_device:
+                        self.state.remote_inputs[slot_id].update(op)
+                    else:
+                        logger.warning("Ignoring remote slot %s with ambiguous owner on %s", slot_id, transport.host)
             case codec.OutputCommand():
                 if isinstance(op, codec.SourceGainCommand):
                     # Input gain ops are how we can discover the number of expected outputs for a device!
@@ -703,7 +728,7 @@ class System(VersionTrackerMixin):
             self.send_ops(codec.ZoneNameRequestCommand(output=ALL_OUTPUTS), transport=transport)
 
     def refresh(self, *, transport: BaseTransport[Command] | None = None) -> None:
-        """Request missing configuration state and current output state.
+        """Refresh runtime names, distributed routing, and current output state.
 
         Args:
             transport: Optional transport to target or filter the requests.
@@ -712,9 +737,39 @@ class System(VersionTrackerMixin):
             self.send_ops(*device.needed_update_ops(), transport=transport)
         for output in self.state.outputs.values():
             self.send_ops(*output.needed_update_ops(), transport=transport)
-        for remote_input in self.state.remote_inputs.values():
-            self.send_ops(*remote_input.needed_update_ops(), transport=transport)
-        self.refresh_outputs(transport=transport)
+        for device in self.state.devices.values():
+            if transport is not None and self.transport_for_device(device) is not transport:
+                continue
+            if device.outputs:
+                self.send_ops(
+                    codec.SourceNameOptionsRequestCommand(output=device.outputs[0]),
+                    transport=transport,
+                )
+            if self.transport_for_device(device) is not None:
+                for slot_id in REMOTE_INPUT_SLOT_IDS:
+                    self._invalidate_remote_slot(device.id, slot_id)
+                self.send_ops(
+                    *(codec.DistributedSourceDefinitionRequestCommand(slot_id=slot_id)
+                      for slot_id in REMOTE_INPUT_SLOT_IDS),
+                    transport=self.transport_for_device(device),
+                )
+        if not self.state.remote_inputs_by_device:
+            for remote_input in self.state.remote_inputs.values():
+                remote_input.present = None
+                remote_input.device_guid = None
+                remote_input.source_index = None
+                remote_input.name = None
+                self.send_ops(*remote_input.needed_update_ops(), transport=transport)
+        self.refresh_outputs(include_names=bool(self.state.outputs), transport=transport)
+
+    def _invalidate_remote_slot(self, device_id: HexBytes, slot_id: int) -> None:
+        """Prevent use of a cached route until a fresh device reply arrives."""
+        slot = self.state.remote_inputs_by_device[(device_id, slot_id)]
+        slot.present = None
+        slot.device_guid = None
+        slot.source_index = None
+        slot.name = None
+        self.state._update_remote_consensus(slot_id)
 
     async def discover_devices(
         self,
@@ -792,6 +847,9 @@ class System(VersionTrackerMixin):
                     )
                     if self.version != previous_version:
                         continue
+                    # A completed identity table is not sufficient for safe
+                    # per-amplifier routing without all transport owners.
+                    continue
                 break
 
             if not has_enough_devices:
@@ -941,10 +999,29 @@ class System(VersionTrackerMixin):
             time_between_probes_secs: Delay or wait timeout between probe rounds.
         """
         slot_ids = REMOTE_INPUT_SLOT_IDS if slot_ids is None else tuple(slot_ids)
-        for slot_id in slot_ids:
-            _ = self.state.remote_inputs[slot_id]
+        if any(slot_id not in REMOTE_INPUT_SLOT_IDS for slot_id in slot_ids):
+            raise ValueError("Remote slot ids must be between 0 and 31")
+        targets: list[tuple[BaseTransport[Command], HexBytes | None]] = []
+        for transport in self.transports:
+            owners = self._devices_for_transport_event(transport)
+            if len(owners) == 1:
+                targets.append((transport, owners[0].id))
+            elif len(self.transports) == 1 and not owners and not self.state.remote_inputs_by_device:
+                targets.append((transport, None))
+            else:
+                raise ValueError(f"Cannot discover remote slots without an owner for {transport.host}")
+        for _, device_id in targets:
+            for slot_id in slot_ids:
+                if device_id is not None:
+                    self._invalidate_remote_slot(device_id, slot_id)
+                else:
+                    slot = self.state.remote_inputs[slot_id]
+                    slot.present = None
+                    slot.device_guid = None
+                    slot.source_index = None
+                    slot.name = None
 
-        def needed_probe_ops() -> list[codec.Command]:
+        def needed_probe_ops(device_id: HexBytes | None) -> list[codec.Command]:
             """Build remote-input slot requests still needed.
 
             Returns:
@@ -952,16 +1029,19 @@ class System(VersionTrackerMixin):
             """
             probe_ops: list[codec.Command] = []
             for slot_id in slot_ids:
-                probe_ops.extend(self.state.remote_inputs[slot_id].needed_update_ops())
+                slot = self.state.remote_input_for_device(device_id, slot_id)
+                if slot is None or slot.present is None:
+                    probe_ops.append(codec.DistributedSourceDefinitionRequestCommand(slot_id=slot_id))
             return probe_ops
 
         while True:
-            probe_ops = needed_probe_ops()
-            if not probe_ops:
+            pending = [(transport, needed_probe_ops(device_id)) for transport, device_id in targets]
+            if not any(ops for _, ops in pending):
                 break
-            self.send_ops(*probe_ops)
+            for transport, ops in pending:
+                self.send_ops(*ops, transport=transport)
             await self.wait_for_ready(
-                lambda: len(needed_probe_ops()) == 0,
+                lambda: all(not needed_probe_ops(device_id) for _, device_id in targets),
                 time_between_probes_secs,
             )
 
@@ -1410,7 +1490,9 @@ class DeviceSelector(Selector):
 
 
 class RemoteSourceSelector(Selector):
-    def __init__(self, system: System, remote_source_id: int) -> None:
+    def __init__(
+        self, system: System, remote_source_id: int, *, device_id: HexBytes | None = None
+    ) -> None:
         """Create a selector for a distributed source slot.
 
         Args:
@@ -1418,7 +1500,11 @@ class RemoteSourceSelector(Selector):
             remote_source_id: Zero-based distributed source slot id.
         """
         self.system = system
-        remote_source = self.system.state.remote_inputs.get(remote_source_id)
+        remote_source = (
+            self.system.state.remote_input_for_device(device_id, remote_source_id)
+            if device_id is not None
+            else self.system.state.remote_inputs.get(remote_source_id)
+        )
         if remote_source is None:
             raise ValueError(f"Remote source {remote_source_id} not found")
         self.remote_source = remote_source
@@ -1692,7 +1778,10 @@ class OutputSelector(Selector):
         remote_source = self.system.state.output_remote_source(output)
         if remote_source is None:
             return None
-        return RemoteSourceSelector(self.system, remote_source.id)
+        device = self.system.state.device_for_output(output.id)
+        return RemoteSourceSelector(
+            self.system, remote_source.id, device_id=None if device is None else device.id
+        )
 
     def _local_source_selector_for_output(self, output: OutputState) -> int | None:
         """Infer the active local source selector for an output.
@@ -1824,14 +1913,28 @@ class OutputSelector(Selector):
         Returns:
             RemoteSourceSelector for the active present remote source, or None.
         """
-        remote_source_selector = self.remote_source_selector
-        if remote_source_selector is None:
-            return None
-        remote_source_id = remote_source_selector - REMOTE_SOURCE_SELECTOR_MIN
-        remote_source = self.system.state.remote_inputs.get(remote_source_id)
-        if remote_source is None or not remote_source.present:
-            return None
-        return RemoteSourceSelector(self.system, remote_source_id)
+        output = self.output
+        if output is not None:
+            return self._remote_source_for_output(output)
+        selected: RemoteSourceSelector | None = None
+        for target in self.system.state.outputs.values():
+            candidate = self._remote_source_for_output(target)
+            if candidate is None:
+                return None
+            if selected is not None and (
+                candidate.id,
+                candidate.remote_source.device_guid,
+                candidate.remote_source.source_index,
+                candidate.name,
+            ) != (
+                selected.id,
+                selected.remote_source.device_guid,
+                selected.remote_source.source_index,
+                selected.name,
+            ):
+                return None
+            selected = candidate
+        return selected
 
     @property
     def remote_backing_device(self) -> "DeviceSelector | None":

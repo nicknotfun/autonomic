@@ -370,6 +370,129 @@ def test_command_encoder_filters_writes_only_in_read_only_mode() -> None:
     assert str(CommandEncoder(read_only=False).encode(StandbyPowerCommand(is_on=ToggleBool.On))) == "01FF01"
 
 
+@pytest.mark.parametrize("read_only", [True, False])
+@pytest.mark.parametrize(
+    "command",
+    [
+        codec.VolumeCommand(output=1, detail=(80,)),
+        codec.SourceSelectionCommand(output=1, detail=(5,)),
+        codec.MaximumVolumeCommand(output=1, detail=(80,)),
+        codec.PowerOnVolumeLevelCommand(output=1, detail=(80,)),
+        codec.AmplifierSpecialFeaturesCommand(output=1, detail=(1,)),
+        codec.LinkZonePairCommand(output=1, options=1),
+        codec.SourceGainCommand(output=1, gains=(0.5,)),
+        codec.RegisterServiceCommand(source=1, payload=HexBytes("01")),
+        codec.SourceNameOptionsCommand(output=1, source_selector=5, name="TV"),
+        codec.SourceNameOptionsCommand(output=1, source_selector=5, hidden_name="Hidden"),
+    ],
+)
+def test_command_encoder_rejects_field_holes_before_read_only_filtering(
+    command: Command, read_only: bool
+) -> None:
+    with pytest.raises(ValueError, match="required before later fields"):
+        CommandEncoder(read_only=read_only).encode(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        codec.NetworkSettingsCommandResponse(
+            device_id=HexBytes("00D4"), setting_id=5, payload=HexBytes(GUID.bytes_le)
+        ),
+        codec.NetworkSettingsAmplifierStackAssignmentCommandResponse(
+            device_id=HexBytes("00D4"), system_id=1
+        ),
+        codec.AudioDelayCommandResponse(output=1, source_delays=(20,)),
+        codec.RequestProtocolVersionCommandResponse(version=1),
+        codec.ClippingNotificationCommand(output=1, event=1, info=1),
+    ],
+)
+def test_read_only_encoder_never_sends_response_objects(command: Command) -> None:
+    wire = CommandEncoder(read_only=False).encode(command)
+
+    assert wire is not None
+    assert CommandEncoder().encode(command) is None
+    assert CommandEncoder().decoder(wire) is not None
+
+
+def test_generic_network_settings_requires_the_query_bit_in_read_only_mode() -> None:
+    encoder = CommandEncoder()
+
+    assert encoder.encode(
+        codec.NetworkSettingsCommand(device_id=HexBytes("00D4"), setting_id=5)
+    ) is None
+    assert encoder.encode(
+        codec.NetworkSettingsCommand(device_id=HexBytes("00D4"), setting_id=0x85)
+    ) == HexBytes("3AFF00D485")
+    assert encoder.encode(
+        codec.NetworkSettingsCommand(
+            device_id=HexBytes("00D4"), setting_id=0x85, payload=HexBytes(GUID.bytes_le)
+        )
+    ) is None
+
+
+def test_guid_write_disguised_as_generic_response_is_still_decoded_as_a_guid() -> None:
+    response = codec.NetworkSettingsCommandResponse(
+        device_id=HexBytes("00D4"), setting_id=5, payload=HexBytes(GUID.bytes_le)
+    )
+    wire = CommandEncoder(read_only=False).encode(response)
+
+    assert wire is not None
+    assert CommandEncoder().decoder(wire) == codec.NetworkSettingsDeviceGuidCommand(
+        device_id=HexBytes("00D4"), guid=GUID
+    )
+    assert CommandEncoder().encode(response) is None
+
+
+@pytest.mark.parametrize("slot_id", [0x8000, 0x800F, 0xBFFF])
+def test_read_only_encoder_blocks_storage_deletion_without_payload(slot_id: int) -> None:
+    deletion = codec.ArbitraryDataStorageCommand(slot_id=slot_id)
+
+    assert deletion.is_write()
+    assert CommandEncoder().encode(deletion) is None
+    assert CommandEncoder(read_only=False).encode(deletion) == HexBytes(
+        "4EFF" + f"{slot_id:04X}"
+    )
+    assert CommandEncoder().encode(
+        codec.ArbitraryDataStorageCommand(slot_id=slot_id & 0x3FFF)
+    ) is not None
+
+
+@pytest.mark.parametrize("entry_index", [0, 1, 0xFE])
+def test_read_only_encoder_blocks_media_list_terminators(entry_index: int) -> None:
+    # Manufacturer pp. 12–13, 35 and 42–43: only FF requests each list;
+    # another index without strings terminates (and can truncate) the list.
+    commands = [
+        codec.MediaFavouritesCommand(device_id=HexBytes("00D4"), favorite_index=entry_index),
+        codec.MediaServersCommand(device_id=HexBytes("00D4"), entry_index=entry_index),
+        codec.UserAccountsCommand(device_id=HexBytes("00D4"), entry_index=entry_index),
+    ]
+
+    for command in commands:
+        assert command.is_write()
+        assert CommandEncoder().encode(command) is None
+        assert CommandEncoder(read_only=False).encode(command) is not None
+
+
+def test_read_only_encoder_allows_explicit_media_list_requests() -> None:
+    commands = [
+        codec.MediaFavouritesCommand(device_id=HexBytes("00D4"), favorite_index=0xFF),
+        codec.MediaServersCommand(device_id=HexBytes("00D4"), entry_index=0xFF),
+        codec.UserAccountsCommand(device_id=HexBytes("00D4"), entry_index=0xFF),
+    ]
+
+    for command in commands:
+        assert not command.is_write()
+        assert CommandEncoder().encode(command) is not None
+
+
+def test_read_only_encoder_blocks_service_registration_without_flags() -> None:
+    registration = codec.RegisterServiceCommand(output=1, source=2)
+
+    assert registration.is_write()
+    assert CommandEncoder().encode(registration) is None
+
+
 def test_command_encoder_decoder_delegates_to_subclass_decode() -> None:
     assert CommandEncoder().decoder(bytes.fromhex("01FF")) == StandbyPowerCommand()
     assert CommandEncoder().decoder(bytes.fromhex("FFFF")) is None

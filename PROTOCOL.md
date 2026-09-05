@@ -52,13 +52,24 @@ readbacks, or configuration writes depending on the command family.
 | `4X`, `12X` | Fixed raw byte count expressed in hex characters. |
 | `hex` | Remaining raw bytes. |
 | `utf8` | Remaining bytes decoded as UTF-8. |
-| `lenutf8` | One-byte length prefix followed by UTF-8 text. |
+| `lenutf8` | One-byte length prefix followed by 0–31 UTF-8 bytes. |
 | `guid` | 16 bytes in Autonomic/Windows GUID byte order. |
 | `uuid` | 16 bytes in RFC UUID byte order. |
 | `field?` | Optional field. |
 | `field*` | Zero or more repeated fields. |
 | `field+` | One or more repeated fields. |
 | `!` | Pattern must consume the whole row. |
+
+Optional positional fields cannot be skipped when doing so would shift a later
+value into their place. The self-identifying `lenutf8` field can be omitted
+before a plain trailing name. `+` requires at least one item on both encode and
+decode. Read-only encoding filters writes and response-only rows; writable
+encoding still supports response round trips for tooling and tests.
+
+Payload omission alone does not imply a query: `10`, `3B`, and `45` require
+index `FF` with no payload to read; an empty high-bit `4E` storage slot row is a
+deletion. `51` service registration changes state even without flags. These
+forms are filtered by read-only encoding.
 
 ## Common Values
 
@@ -72,6 +83,9 @@ Power and mute use different byte polarity:
 Volume, maximum volume, master volume, and power-on volume use raw `00`-`A0`,
 scaled linearly to `0.0`-`1.0`. Source gain uses raw `00`-`12`, also scaled
 linearly to `0.0`-`1.0`.
+
+Scaled values must be finite and within their declared range. Raw values beyond
+the declared integer maximum are rejected instead of decoding above `1.0`.
 
 Bass, treble, balance, and zone gain are signed one-byte values.
 

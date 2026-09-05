@@ -3,9 +3,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from _system_example import add_connection_args, discover_or_timeout, selected_hosts
+from _system_example import (
+    add_connection_args,
+    discover_or_timeout,
+    selected_hosts,
+    send_output_plan,
+)
 
 from amp.byte_utils import HexBytes
+from amp.codec import SourceSelectionCommand
 from amp.system import InputSelector, System
 
 
@@ -29,14 +35,18 @@ def input_by_device_and_name(
     raise ValueError(f"Input {name!r} was not discovered on device {device_id}")
 
 
-def assign_device_outputs(
+def device_output_plan(
     system: System,
     device_id: HexBytes,
     input: InputSelector,
-) -> None:
+) -> tuple[SourceSelectionCommand, ...]:
     device = system.state.devices[device_id]
+    commands: list[SourceSelectionCommand] = []
     for output_id in device.outputs or ():
-        system.output(output_id).set_input(input)
+        commands.extend(
+            system.state.source_selection_commands_for_input(output_id, input.input)
+        )
+    return tuple(commands)
 
 
 async def async_main() -> None:
@@ -57,17 +67,20 @@ async def async_main() -> None:
     args = parser.parse_args()
 
     with System(selected_hosts(args), read_only=False, trace=args.trace) as system:
-        await discover_or_timeout(system, args)
-        assign_device_outputs(
-            system,
-            M6250_DEVICE,
-            input_by_device_and_name(system, M6250_DEVICE, args.m6250_source_name),
+        await discover_or_timeout(system, args, require_complete=True)
+        plan = (
+            *device_output_plan(
+                system,
+                M6250_DEVICE,
+                input_by_device_and_name(system, M6250_DEVICE, args.m6250_source_name),
+            ),
+            *device_output_plan(
+                system,
+                MA6_DEVICE,
+                input_by_device_and_name(system, MA6_DEVICE, args.ma6_source_name),
+            ),
         )
-        assign_device_outputs(
-            system,
-            MA6_DEVICE,
-            input_by_device_and_name(system, MA6_DEVICE, args.ma6_source_name),
-        )
+        send_output_plan(system, plan)
         await asyncio.sleep(args.settle)
 
 

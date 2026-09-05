@@ -21,6 +21,7 @@ ALL_USED_OUTPUTS = 0xFA
 class Command:
     COMMAND_STATUS: ClassVar[str] = "active"
     COMMAND_NOTE: ClassVar[str] = "Documented manufacturer command."
+    RESPONSE_ONLY: ClassVar[bool] = False
 
     def is_write(self) -> bool:
         return True
@@ -75,7 +76,7 @@ class SourceSelectionCommand(OutputCommand):
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return self.source is not None
+        return self.source is not None or bool(self.detail)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -86,7 +87,7 @@ class VolumeCommand(OutputCommand):
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return self.volume is not None
+        return self.volume is not None or bool(self.detail)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -129,6 +130,7 @@ class RequestProtocolVersionCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestProtocolVersionCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "88{output:N}{version:N}!"
 
     version: int
@@ -153,6 +155,7 @@ class SendAllParametersCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class ReportErrorCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     COMMAND_STATUS: ClassVar[str] = "obsolete"
     COMMAND_NOTE: ClassVar[str] = "Manufacturer marks Report Error (0A) obsolete."
     PATTERN: ClassVar[str] = "0A{output:N}{payload:hex?}!"
@@ -180,7 +183,7 @@ class AmplifierSpecialFeaturesCommand(OutputCommand):
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return self.is_loud is not None
+        return self.is_loud is not None or bool(self.detail)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -191,7 +194,7 @@ class MaximumVolumeCommand(OutputCommand):
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return self.max_volume is not None
+        return self.max_volume is not None or bool(self.detail)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -230,7 +233,7 @@ class MediaFavouritesCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.payload is not None
+        return self.favorite_index != 0xFF or self.payload is not None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -266,6 +269,7 @@ class RequestDeviceInformationCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestDeviceInformationCommandResponse(DeviceIdCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "94FF00{firmware:N}{model_id}{device_id:4X}{zones:N*}!"
 
     firmware: int
@@ -420,6 +424,7 @@ class RequestDeviceLogEntryCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestDeviceLogEntryCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "A2{output:N}{device_id:4X}{payload:hex}!"
 
     device_id: HexBytes
@@ -452,6 +457,7 @@ class RequestPcmCapabilitiesCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestPcmCapabilitiesCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     COMMAND_STATUS: ClassVar[str] = "obsolete"
     COMMAND_NOTE: ClassVar[str] = (
         "Manufacturer marks Request PCM capabilities response (A4) obsolete."
@@ -483,6 +489,7 @@ class PcmStreamCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class PcmStreamCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     COMMAND_STATUS: ClassVar[str] = "obsolete"
     COMMAND_NOTE: ClassVar[str] = "Manufacturer marks PCM Stream response (A5) obsolete."
     PATTERN: ClassVar[str] = "A5{output:N}{device_id:4X}{purpose:N}{position:8N}!"
@@ -601,6 +608,7 @@ class RequestZoneAssignmentsCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestZoneAssignmentsCommandResponse(DeviceIdCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "AF{output:N}{device_id:4X}{zones:N*}!"
 
     output: int = ALL_OUTPUTS
@@ -633,6 +641,7 @@ class AudioDelayCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class AudioDelayCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "31{output:N}{source_delays:N+}!"
 
     source_delays: tuple[int, ...]
@@ -661,6 +670,7 @@ class PagePreset2SelectionCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class ClippingNotificationCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "34{output:N}{event:N}{info:N}!"
 
     event: int
@@ -720,6 +730,7 @@ class RequestExtendedDeviceInformationCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestExtendedDeviceInformationCommandResponse(DeviceIdCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "B9FF{prefix:4X}{device_id:4X}{model_info:18X}{mac:12X}{detail:hex}!"
 
     prefix: HexBytes
@@ -751,6 +762,7 @@ class NetworkSettingsDeviceGuidCommand(DeviceIdCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class NetworkSettingsAmplifierStackAssignmentCommandResponse(DeviceIdCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "3AFF{device_id:4X}06{system_id:N}!"
 
     system_id: int
@@ -761,6 +773,7 @@ class NetworkSettingsAmplifierStackAssignmentCommandResponse(DeviceIdCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class NetworkSettingsCommandResponse(DeviceIdCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "3AFF{device_id:4X}{setting_id:N}{payload:hex}!"
 
     setting_id: int
@@ -779,7 +792,7 @@ class NetworkSettingsCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.payload is not None
+        return self.payload is not None or not (self.setting_id & 0x80)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -791,7 +804,7 @@ class MediaServersCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.payload is not None
+        return self.entry_index != 0xFF or self.payload is not None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -814,6 +827,7 @@ class MediaPlayerPlayControlCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class PlayStatusNotificationCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "3E{output:N}{source:N}{parameter:N}{payload:hex?}!"
 
     source: int
@@ -837,6 +851,7 @@ class PlayStatusRequestCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class ReportMessageCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "40{output:N}{message_type:N}{message:utf8?}!"
 
     message_type: int
@@ -858,6 +873,7 @@ class RequestTimeCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestTimeCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = (
         "C1{output:N}{hour:N}{minute:N}{second:N}{weekday:N}{day:N}{month:N}{year:N}!"
     )
@@ -917,7 +933,7 @@ class UserAccountsCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.payload is not None
+        return self.entry_index != 0xFF or self.payload is not None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -948,7 +964,7 @@ class PowerOnVolumeLevelCommand(OutputCommand):
     detail: tuple[int, ...] = ()
 
     def is_write(self) -> bool:
-        return self.power_on_volume is not None
+        return self.power_on_volume is not None or bool(self.detail)
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -963,6 +979,7 @@ class RequestKeypadZoneAssignmentCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class RequestKeypadZoneAssignmentCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "C9{output:N}{keypad_id:8X}{assigned_output:N}!"
 
     keypad_id: HexBytes
@@ -1015,6 +1032,7 @@ class KeypadPortOccupancyCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class KeypadPortOccupancyCommandResponse(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "CD{output:N}{device_id:4X}{occupancy:N}!"
 
     device_id: HexBytes
@@ -1032,7 +1050,8 @@ class ArbitraryDataStorageCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.payload is not None
+        # An empty high-bit slot row deletes the entry (manufacturer pp. 46–47).
+        return bool(self.slot_id & 0x8000) or self.payload is not None
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -1088,7 +1107,8 @@ class RegisterServiceCommand(OutputCommand):
     payload: HexBytes | None = None
 
     def is_write(self) -> bool:
-        return self.flags is not None
+        # Registration changes service membership even when flags are omitted.
+        return True
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -1102,6 +1122,7 @@ class ExtendedPlayControlCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class ExtendedPlayStatusCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "53{output:N}{service_id:N}{parameter:N}{payload:hex?}!"
 
     service_id: int
@@ -1125,6 +1146,7 @@ class ExtendedPlayStatusRequestCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class ServiceStatusCommand(OutputCommand):
+    RESPONSE_ONLY: ClassVar[bool] = True
     PATTERN: ClassVar[str] = "55{output:N}{service_id:N}{flags:N}{zones:N*}!"
 
     service_id: int
@@ -1166,6 +1188,7 @@ class UndocumentedHostIdentityCommand(OutputCommand):
 
 @dataclass(kw_only=True, frozen=True)
 class UndocumentedHostIdentityCommandResponse(Command):
+    RESPONSE_ONLY: ClassVar[bool] = True
     COMMAND_STATUS: ClassVar[str] = "undocumented"
     COMMAND_NOTE: ClassVar[str] = "Observed live-device host identity response."
     PATTERN: ClassVar[str] = "58FF00{guid:uuid}{mac:12X}{detail:hex}!"
@@ -1189,14 +1212,21 @@ class UndocumentedHostIdentityCommandResponse(Command):
 
 
 class CommandEncoder(SubclassEncoder[Command]):
+    """Encode validated commands, suppressing writes and responses in read-only mode.
+
+    Writable encoding retains response round trips for protocol tooling; a response
+    is never treated as a safe query merely because its ``is_write()`` is false.
+    """
+
     def __init__(self, read_only: bool = True) -> None:
         super().__init__(Command)
         self.read_only = read_only
 
     def encode(self, value: Command) -> HexBytes | None:
-        if self.read_only and value.is_write():
+        encoded = super().encode(value)
+        if self.read_only and (value.RESPONSE_ONLY or value.is_write()):
             return None
-        return super().encode(value)
+        return encoded
 
     def decoder(self, value: bytes) -> Command | None:
         return super().decode(value)

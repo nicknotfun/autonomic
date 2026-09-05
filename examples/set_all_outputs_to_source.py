@@ -3,8 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from _system_example import add_connection_args, discover_or_timeout, selected_hosts
+from _system_example import (
+    add_connection_args,
+    discover_or_timeout,
+    selected_hosts,
+    send_output_plan,
+)
 
+from amp.codec import ALL_OUTPUTS
 from amp.system import InputSelector, System
 
 
@@ -31,9 +37,10 @@ async def async_main() -> None:
     args = parser.parse_args()
 
     with System(selected_hosts(args), read_only=False, trace=args.trace) as system:
-        await discover_or_timeout(system, args)
+        await discover_or_timeout(system, args, require_complete=True)
         source = select_input(system, args.source_name)
-        system.all_outputs().set_input(source)
+        plan = system.state.source_selection_commands_for_input(ALL_OUTPUTS, source.input)
+        send_output_plan(system, plan)
         await asyncio.sleep(args.settle)
 
 

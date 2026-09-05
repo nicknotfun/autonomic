@@ -1,5 +1,8 @@
+from uuid import UUID
+
 from amp.byte_utils import HexBytes
 from amp.codec import (
+    DistributedSourceDefinitionCommand,
     RequestDeviceInformationCommandResponse,
     SourceNameOptionsCommand,
     SourceSelectionCommand,
@@ -76,3 +79,22 @@ def test_input_state_qualified_name_round_trips_physical_source_ids() -> None:
     assert input_state.qualified_name == "00D4:7"
     assert InputState.parse_qualified_name("00D4:7") == (HexBytes("00D4"), 0x02)
     assert InputState.parse_qualified_name("00D4:0x20") == (HexBytes("00D4"), 0x20)
+
+
+def test_merging_legacy_state_cannot_override_owned_slot_consensus() -> None:
+    state = SystemState()
+    owner = HexBytes("00D4")
+    guid = UUID("674e1900-f8a9-f6be-a465-3d0fbee12977")
+    state.update_remote_input(owner, DistributedSourceDefinitionCommand(
+        slot_id=0, backing_device_guid=guid, source_index=6, name="Current",
+    ))
+    old_snapshot = SystemState()
+    old_snapshot.remote_inputs[0].update(DistributedSourceDefinitionCommand(
+        slot_id=0, backing_device_guid=guid, source_index=7, name="Old",
+    ))
+
+    state.merge(old_snapshot)
+
+    assert state.remote_inputs[0].name == "Current"
+    assert state.remote_inputs[0].source_index == 6
+    assert state.remote_inputs_by_device[(owner, 0)].name == "Current"

@@ -3,6 +3,8 @@ import asyncio
 import pytest
 
 from amp.byte_utils import HexBytes
+from amp.codec import CommandEncoder, StandbyPowerCommand, VolumeUpCommand
+from amp.toggle_bool import ToggleBool
 from amp.transport import (
     DEFAULT_CONNECTION_TIMEOUT_SECS,
     ConnectionInterrupted,
@@ -14,6 +16,8 @@ from amp.transport import (
 
 class DummyEncoder:
     def encode(self, value: str) -> HexBytes | None:
+        if value == "invalid":
+            raise ValueError("invalid operation")
         if value == "skip":
             return None
         if value == "first-copy":
@@ -51,7 +55,7 @@ def test_transport_queue_encodes_connection_interrupted_as_empty_bytes() -> None
     asyncio.run(scenario())
 
 
-def test_transport_queue_dedupes_by_encoded_representation() -> None:
+def test_transport_queue_preserves_equal_encoded_representations() -> None:
     async def scenario() -> None:
         queue: TransportQueue[str] = TransportQueue(DummyEncoder())
         queue.push("first")
@@ -59,13 +63,15 @@ def test_transport_queue_dedupes_by_encoded_representation() -> None:
         queue.push("second")
 
         assert await queue.pull() == ("first", b"first")
+        queue.task_done()
+        assert await queue.pull() == ("first-copy", b"first")
         queue.task_done()
         assert await queue.pull() == ("second", b"second")
 
     asyncio.run(scenario())
 
 
-def test_transport_queue_dedupes_incomplete_items_until_task_done() -> None:
+def test_transport_queue_preserves_new_items_matching_an_incomplete_item() -> None:
     async def scenario() -> None:
         queue: TransportQueue[str] = TransportQueue(DummyEncoder())
         queue.push("first")
@@ -77,9 +83,39 @@ def test_transport_queue_dedupes_incomplete_items_until_task_done() -> None:
         queue.task_done()
 
         queue.push("first-copy")
+        assert await queue.pull() == ("first-copy", b"first")
+        queue.task_done()
         assert await queue.pull() == ("second", b"second")
         queue.task_done()
         assert await queue.pull() == ("first-copy", b"first")
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+def test_transport_queues_preserve_state_transitions_and_repeated_increments(
+    direction: str,
+) -> None:
+    async def scenario() -> None:
+        transport = Transport(CommandEncoder(read_only=False), "127.0.0.1")
+        queue = getattr(transport, direction)
+        commands = [
+            StandbyPowerCommand(output=1, is_on=ToggleBool.On),
+            StandbyPowerCommand(output=1, is_on=ToggleBool.Off),
+            StandbyPowerCommand(output=1, is_on=ToggleBool.On),
+            VolumeUpCommand(output=1),
+            VolumeUpCommand(output=1),
+        ]
+        for command in commands:
+            queue.push(command)
+        queue.shutdown()
+
+        for expected in commands:
+            actual, _ = await queue.pull()
+            assert actual == expected
+            queue.task_done()
+        with pytest.raises(TransportQueueClosed):
+            await queue.pull()
 
     asyncio.run(scenario())
 
@@ -114,6 +150,85 @@ def test_transport_send_starts_loop_and_queues_outbound_ops() -> None:
         assert await transport.outbound.pull() == ("second", b"second")
         transport.shutdown()
         await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("already_running", [False, True])
+def test_transport_send_validates_entire_batch_before_mutating_queue(
+    already_running: bool,
+) -> None:
+    async def scenario() -> None:
+        transport = Transport(DummyEncoder(), "127.0.0.1")
+
+        async def fake_loop() -> None:
+            await asyncio.Event().wait()
+
+        transport._loop = fake_loop  # type: ignore[method-assign]
+        if already_running:
+            transport.send("existing")
+        previous_loop = transport._loop_task
+        try:
+            with pytest.raises(ValueError, match="invalid operation"):
+                transport.send("first", "invalid")
+
+            assert transport._loop_task is previous_loop
+            transport.outbound.shutdown()
+            if already_running:
+                assert await transport.outbound.pull() == ("existing", b"existing")
+                transport.outbound.task_done()
+            with pytest.raises(TransportQueueClosed):
+                await transport.outbound.pull()
+        finally:
+            await transport.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_transport_validate_send_does_not_start_loop_or_enqueue() -> None:
+    async def scenario() -> None:
+        transport = Transport(DummyEncoder(), "127.0.0.1")
+
+        transport.validate_send("first", "skip", "second")
+        with pytest.raises(ValueError, match="invalid operation"):
+            transport.validate_send("first", "invalid")
+
+        assert transport._loop_task is None
+        transport.outbound.shutdown()
+        with pytest.raises(TransportQueueClosed):
+            await transport.outbound.pull()
+
+    asyncio.run(scenario())
+
+
+def test_transport_send_encodes_each_operation_once_and_omits_suppressed_ops() -> None:
+    async def scenario() -> None:
+        encoded_values: list[str] = []
+
+        class CountingEncoder(DummyEncoder):
+            def encode(self, value: str) -> HexBytes | None:
+                encoded_values.append(value)
+                return super().encode(value)
+
+        transport = Transport(CountingEncoder(), "127.0.0.1")
+
+        async def fake_loop() -> None:
+            await asyncio.Event().wait()
+
+        transport._loop = fake_loop  # type: ignore[method-assign]
+        try:
+            transport.send("first", "skip", "first-copy")
+
+            assert encoded_values == ["first", "skip", "first-copy"]
+            transport.outbound.shutdown()
+            assert await transport.outbound.pull() == ("first", b"first")
+            transport.outbound.task_done()
+            assert await transport.outbound.pull() == ("first-copy", b"first")
+            transport.outbound.task_done()
+            with pytest.raises(TransportQueueClosed):
+                await transport.outbound.pull()
+        finally:
+            await transport.aclose()
 
     asyncio.run(scenario())
 
@@ -204,6 +319,53 @@ def test_transport_recv_starts_loop_and_yields_inbound_ops() -> None:
         await receiver.aclose()
         transport.shutdown()
         await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
+def test_transport_recv_stops_after_shutdown_while_paused_at_yield() -> None:
+    async def scenario() -> None:
+        transport = Transport(DummyEncoder(), "127.0.0.1")
+
+        async def fake_loop() -> None:
+            await asyncio.Event().wait()
+
+        transport._loop = fake_loop  # type: ignore[method-assign]
+        transport.inbound.push("decoded")
+        receiver = transport.recv()
+
+        assert await receiver.__anext__() == "decoded"
+        await transport.aclose()
+
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(receiver.__anext__(), timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_transport_can_restart_immediately_after_shutdown() -> None:
+    async def scenario() -> None:
+        transport = Transport(DummyEncoder(), "127.0.0.1")
+
+        async def fake_loop() -> None:
+            await asyncio.Event().wait()
+
+        transport._loop = fake_loop  # type: ignore[method-assign]
+        transport.send("first")
+        old_loop = transport._loop_task
+        assert old_loop is not None
+        transport.shutdown()
+        transport.send("second")
+        new_loop = transport._loop_task
+        assert new_loop is not None
+        try:
+            assert new_loop is not old_loop
+            await asyncio.gather(old_loop, return_exceptions=True)
+            assert transport._loop_task is new_loop
+            assert not new_loop.done()
+            assert await transport.outbound.pull() == ("second", b"second")
+        finally:
+            await transport.aclose()
 
     asyncio.run(scenario())
 

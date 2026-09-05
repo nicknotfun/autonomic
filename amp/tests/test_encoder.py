@@ -73,6 +73,46 @@ def test_plus_repeat_requires_at_least_one_value() -> None:
     assert pattern.parse(HexBytes("0102")) == {"items": (1, 2)}
     with pytest.raises(ParseUnderflowError, match="at least 1"):
         pattern.parse(b"")
+    with pytest.raises(ValueError, match="at least 1"):
+        pattern.emit(SimpleNamespace(items=()))
+    assert pattern.emit(SimpleNamespace(items=(1, 2))) == HexBytes("0102")
+
+
+@pytest.mark.parametrize("encoded", ["A1", "FF"])
+def test_float_decode_rejects_wire_values_above_the_declared_maximum(encoded: str) -> None:
+    pattern = MessagePattern("{level:float(160,0.0,1.0)?}{detail:N*}!")
+
+    with pytest.raises(ValueError, match="out of range"):
+        pattern.parse(HexBytes(encoded))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_float_encode_rejects_nonfinite_values(value: float) -> None:
+    with pytest.raises(ValueError, match="out of range"):
+        MessagePattern("{level:float(160,0.0,1.0)}!").emit(SimpleNamespace(level=value))
+
+
+@pytest.mark.parametrize(
+    ("pattern", "message"),
+    [
+        ("{level:N?}{detail:N*}!", SimpleNamespace(level=None, detail=(80,))),
+        ("{options:6X?}{name:utf8?}!", SimpleNamespace(options=None, name="TV")),
+        ("{source:N?}{gain:N?}!", SimpleNamespace(source=None, gain=9)),
+    ],
+)
+def test_emit_rejects_omitted_positional_fields_before_supplied_fields(
+    pattern: str, message: SimpleNamespace
+) -> None:
+    with pytest.raises(ValueError, match="required before later fields"):
+        MessagePattern(pattern).emit(message)
+
+
+def test_emit_allows_only_unambiguous_omission_of_a_length_prefixed_string() -> None:
+    pattern = MessagePattern("{hidden:lenutf8?}{name:utf8?}!")
+
+    assert pattern.emit(SimpleNamespace(hidden=None, name="TV")) == HexBytes("5456")
+    with pytest.raises(ValueError, match="required before later fields"):
+        pattern.emit(SimpleNamespace(hidden=None, name="\x01X"))
 
 
 def test_consumes_all_marker_rejects_extra_input() -> None:

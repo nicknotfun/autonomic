@@ -1,9 +1,8 @@
-
 {
   "devices": {
     "00D4": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.579746Z",
+      "updated_at": "2026-09-05T14:20:08.136446Z",
       "host": "10.1.0.200",
       "firmware": 6,
       "model_id": "B0",
@@ -24,7 +23,7 @@
     },
     "00DC": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.572938Z",
+      "updated_at": "2026-09-05T14:20:08.136656Z",
       "host": "10.1.0.201",
       "firmware": 6,
       "model_id": "B0",
@@ -47,7 +46,7 @@
   "inputs": {
     "00D4:0x00": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647494Z",
+      "updated_at": "2026-09-05T14:20:08.339989Z",
       "options": "000001",
       "assigned_name": "COAX1",
       "hidden_name": null,
@@ -57,7 +56,7 @@
     },
     "00D4:0x01": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647516Z",
+      "updated_at": "2026-09-05T14:20:08.340028Z",
       "options": "000001",
       "assigned_name": "COAX2",
       "hidden_name": null,
@@ -67,7 +66,7 @@
     },
     "00D4:0x02": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647538Z",
+      "updated_at": "2026-09-05T14:20:08.340646Z",
       "options": "000001",
       "assigned_name": "W1 Kitchen",
       "hidden_name": null,
@@ -77,7 +76,7 @@
     },
     "00D4:0x03": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647472Z",
+      "updated_at": "2026-09-05T14:20:08.339950Z",
       "options": "000001",
       "assigned_name": "A4",
       "hidden_name": null,
@@ -87,7 +86,7 @@
     },
     "00D4:0x04": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647566Z",
+      "updated_at": "2026-09-05T14:20:08.340704Z",
       "options": "000001",
       "assigned_name": "W2 Living",
       "hidden_name": null,
@@ -97,7 +96,7 @@
     },
     "00D4:0x05": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647397Z",
+      "updated_at": "2026-09-05T14:20:08.339838Z",
       "options": "000001",
       "assigned_name": "TV",
       "hidden_name": null,
@@ -107,7 +106,7 @@
     },
     "00D4:0x06": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647425Z",
+      "updated_at": "2026-09-05T14:20:08.339868Z",
       "options": "000001",
       "assigned_name": "W6 Bedroom",
       "hidden_name": null,
@@ -117,7 +116,7 @@
     },
     "00D4:0x07": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.647449Z",
+      "updated_at": "2026-09-05T14:20:08.339911Z",
       "options": "000001",
       "assigned_name": "A3",
       "hidden_name": null,
@@ -127,7 +126,7 @@
     },
     "00D4:0x20": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.647685Z",
+      "updated_at": "2026-09-05T14:20:08.340895Z",
       "options": "000000",
       "assigned_name": "W1 Kitchen",
       "hidden_name": null,
@@ -137,7 +136,7 @@
     },
     "00D4:0x21": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.647780Z",
+      "updated_at": "2026-09-05T14:20:08.341024Z",
       "options": "000000",
       "assigned_name": "W2 Living",
       "hidden_name": null,
@@ -147,7 +146,7 @@
     },
     "00D4:0x22": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.647878Z",
+      "updated_at": "2026-09-05T14:20:08.341150Z",
       "options": "000000",
       "assigned_name": "W3 Patio",
       "hidden_name": null,
@@ -157,7 +156,7 @@
     },
     "00D4:0x23": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.647975Z",
+      "updated_at": "2026-09-05T14:20:08.341276Z",
       "options": "000000",
       "assigned_name": "W4 Pool",
       "hidden_name": null,
@@ -167,7 +166,7 @@
     },
     "00D4:0x24": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.648077Z",
+      "updated_at": "2026-09-05T14:20:08.341411Z",
       "options": "000000",
       "assigned_name": "W5 Bathroom",
       "hidden_name": null,
@@ -177,7 +176,7 @@
     },
     "00D4:0x25": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.648184Z",
+      "updated_at": "2026-09-05T14:20:08.341535Z",
       "options": "000000",
       "assigned_name": "W6 Bedroom",
       "hidden_name": null,
@@ -187,7 +186,7 @@
     },
     "00D4:0x26": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.648290Z",
+      "updated_at": "2026-09-05T14:20:08.341658Z",
       "options": "000000",
       "assigned_name": "TV",
       "hidden_name": null,
@@ -197,7 +196,7 @@
     },
     "00DC:0x00": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.593335Z",
+      "updated_at": "2026-09-05T14:20:08.158508Z",
       "options": "000001",
       "assigned_name": "COAX1",
       "hidden_name": null,
@@ -207,7 +206,7 @@
     },
     "00DC:0x01": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.762901Z",
+      "updated_at": "2026-09-05T14:20:08.158531Z",
       "options": "000001",
       "assigned_name": "COAX2",
       "hidden_name": null,
@@ -217,7 +216,7 @@
     },
     "00DC:0x02": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.762953Z",
+      "updated_at": "2026-09-05T14:20:08.158554Z",
       "options": "000001",
       "assigned_name": "W3 Patio",
       "hidden_name": null,
@@ -227,7 +226,7 @@
     },
     "00DC:0x03": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.593288Z",
+      "updated_at": "2026-09-05T14:20:08.158483Z",
       "options": "000001",
       "assigned_name": "A4",
       "hidden_name": null,
@@ -237,7 +236,7 @@
     },
     "00DC:0x04": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.763001Z",
+      "updated_at": "2026-09-05T14:20:08.158577Z",
       "options": "000001",
       "assigned_name": "W4 Pool",
       "hidden_name": null,
@@ -247,7 +246,7 @@
     },
     "00DC:0x05": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.593202Z",
+      "updated_at": "2026-09-05T14:20:08.158399Z",
       "options": "000001",
       "assigned_name": "Passthrough",
       "hidden_name": null,
@@ -257,7 +256,7 @@
     },
     "00DC:0x06": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.593229Z",
+      "updated_at": "2026-09-05T14:20:08.158434Z",
       "options": "000001",
       "assigned_name": "W5 Bathroom",
       "hidden_name": null,
@@ -267,7 +266,7 @@
     },
     "00DC:0x07": {
       "version": 5,
-      "updated_at": "2026-08-06T22:52:04.593259Z",
+      "updated_at": "2026-09-05T14:20:08.158459Z",
       "options": "000001",
       "assigned_name": "A3",
       "hidden_name": null,
@@ -277,7 +276,7 @@
     },
     "00DC:0x20": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763187Z",
+      "updated_at": "2026-09-05T14:20:08.158690Z",
       "options": "000000",
       "assigned_name": "W1 Kitchen",
       "hidden_name": null,
@@ -287,7 +286,7 @@
     },
     "00DC:0x21": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763448Z",
+      "updated_at": "2026-09-05T14:20:08.220210Z",
       "options": "000000",
       "assigned_name": "W2 Living",
       "hidden_name": null,
@@ -297,7 +296,7 @@
     },
     "00DC:0x22": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763576Z",
+      "updated_at": "2026-09-05T14:20:08.220952Z",
       "options": "000000",
       "assigned_name": "W3 Patio",
       "hidden_name": null,
@@ -307,7 +306,7 @@
     },
     "00DC:0x23": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763704Z",
+      "updated_at": "2026-09-05T14:20:08.221084Z",
       "options": "000000",
       "assigned_name": "W4 Pool",
       "hidden_name": null,
@@ -317,7 +316,7 @@
     },
     "00DC:0x24": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763831Z",
+      "updated_at": "2026-09-05T14:20:08.221210Z",
       "options": "000000",
       "assigned_name": "W5 Bathroom",
       "hidden_name": null,
@@ -327,7 +326,7 @@
     },
     "00DC:0x25": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.763954Z",
+      "updated_at": "2026-09-05T14:20:08.221344Z",
       "options": "000000",
       "assigned_name": "W6 Bedroom",
       "hidden_name": null,
@@ -337,7 +336,7 @@
     },
     "00DC:0x26": {
       "version": 2,
-      "updated_at": "2026-08-06T22:52:04.764194Z",
+      "updated_at": "2026-09-05T14:20:08.221470Z",
       "options": "000000",
       "assigned_name": "TV",
       "hidden_name": null,
@@ -349,42 +348,42 @@
   "outputs": {
     "1": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.942619Z",
+      "updated_at": "2026-09-05T14:20:08.498948Z",
       "name": "Kitchen",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 130,
       "source_detail": [
         32
       ],
       "volume": 0.6,
       "volume_detail": [
-        118
+        116
       ],
       "max_volume": 1.0
     },
     "2": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.942631Z",
+      "updated_at": "2026-09-05T14:20:08.498962Z",
       "name": "Dining",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 130,
       "source_detail": [
         32
       ],
       "volume": 0.6,
       "volume_detail": [
-        118
+        116
       ],
       "max_volume": 1.0
     },
     "3": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.942643Z",
+      "updated_at": "2026-09-05T14:20:08.498975Z",
       "name": "Living",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 132,
       "source_detail": [
         33
@@ -397,10 +396,10 @@
     },
     "4": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.942655Z",
+      "updated_at": "2026-09-05T14:20:08.498988Z",
       "name": "Master",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 134,
       "source_detail": [
         37
@@ -413,10 +412,10 @@
     },
     "5": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.942667Z",
+      "updated_at": "2026-09-05T14:20:08.499001Z",
       "name": "Bathroom",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 164,
       "source_detail": [],
       "volume": 0.6,
@@ -427,10 +426,10 @@
     },
     "6": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.942679Z",
+      "updated_at": "2026-09-05T14:20:08.499014Z",
       "name": "Foyer",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 132,
       "source_detail": [
         33
@@ -443,11 +442,11 @@
     },
     "7": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.942692Z",
+      "updated_at": "2026-09-05T14:20:08.499027Z",
       "name": "TV",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -457,11 +456,11 @@
     },
     "8": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.942704Z",
+      "updated_at": "2026-09-05T14:20:08.499040Z",
       "name": "Passthrough",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -471,11 +470,11 @@
     },
     "9": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.941041Z",
+      "updated_at": "2026-09-05T14:20:08.496853Z",
       "name": "Unused 9",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -485,11 +484,11 @@
     },
     "10": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.941054Z",
+      "updated_at": "2026-09-05T14:20:08.496870Z",
       "name": "Unused 10",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -499,10 +498,10 @@
     },
     "11": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.941068Z",
+      "updated_at": "2026-09-05T14:20:08.496884Z",
       "name": "Pool",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 132,
       "source_detail": [
         35
@@ -515,10 +514,10 @@
     },
     "12": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.941081Z",
+      "updated_at": "2026-09-05T14:20:08.496898Z",
       "name": "Patio",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 130,
       "source_detail": [
         34
@@ -531,10 +530,10 @@
     },
     "13": {
       "version": 8,
-      "updated_at": "2026-08-06T22:52:04.941094Z",
+      "updated_at": "2026-09-05T14:20:08.496912Z",
       "name": "Patio Grass",
       "on": true,
-      "muted": false,
+      "muted": true,
       "source_raw": 130,
       "source_detail": [
         34
@@ -547,11 +546,11 @@
     },
     "14": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.941108Z",
+      "updated_at": "2026-09-05T14:20:08.496925Z",
       "name": "Master Patio",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -561,11 +560,11 @@
     },
     "15": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.941121Z",
+      "updated_at": "2026-09-05T14:20:08.496939Z",
       "name": "Unused 15",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -575,11 +574,11 @@
     },
     "16": {
       "version": 7,
-      "updated_at": "2026-08-06T22:52:04.941134Z",
+      "updated_at": "2026-09-05T14:20:08.496952Z",
       "name": "Unused 16",
-      "on": false,
+      "on": true,
       "muted": true,
-      "source_raw": 0,
+      "source_raw": 128,
       "source_detail": [],
       "volume": 0.6,
       "volume_detail": [
@@ -590,256 +589,770 @@
   },
   "remote_inputs": {
     "0": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941179Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123020Z",
       "present": true,
       "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
       "source_index": 6,
       "name": "W1 Kitchen"
     },
     "1": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941218Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123118Z",
       "present": true,
       "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
       "source_index": 7,
       "name": "W2 Living"
     },
     "2": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941257Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123215Z",
       "present": true,
       "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
       "source_index": 6,
       "name": "W3 Patio"
     },
     "3": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941295Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123322Z",
       "present": true,
       "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
       "source_index": 7,
       "name": "W4 Pool"
     },
     "4": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941339Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123455Z",
       "present": true,
       "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
       "source_index": 1,
       "name": "W5 Bathroom"
     },
     "5": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941375Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123551Z",
       "present": true,
       "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
       "source_index": 1,
       "name": "W6 Bedroom"
     },
     "6": {
-      "version": 4,
-      "updated_at": "2026-08-06T22:52:04.941411Z",
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123649Z",
       "present": true,
       "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
       "source_index": 0,
       "name": "TV"
     },
     "7": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941423Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.123698Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "8": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941437Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.123746Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "9": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941450Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129027Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "10": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941463Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129076Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "11": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941591Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129122Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "12": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941608Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129168Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "13": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941622Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129214Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "14": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941636Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129259Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "15": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941649Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129313Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "16": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941662Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129361Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "17": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941675Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129407Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "18": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941688Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129451Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "19": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941701Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179089Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "20": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941714Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179139Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "21": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941726Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179186Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "22": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941740Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179233Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "23": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941753Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179278Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "24": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941766Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179332Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "25": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941778Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179379Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "26": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941791Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179425Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "27": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941804Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179471Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "28": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941816Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179516Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "29": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941828Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179562Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "30": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941841Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179607Z",
       "present": false,
       "device_guid": null,
       "source_index": null,
       "name": null
     },
     "31": {
-      "version": 1,
-      "updated_at": "2026-08-06T22:52:04.941853Z",
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179652Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    }
+  },
+  "remote_inputs_by_device": {
+    "00D4:0x00": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.122955Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 6,
+      "name": "W1 Kitchen"
+    },
+    "00D4:0x01": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123064Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 7,
+      "name": "W2 Living"
+    },
+    "00D4:0x02": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123162Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 6,
+      "name": "W3 Patio"
+    },
+    "00D4:0x03": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123259Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 7,
+      "name": "W4 Pool"
+    },
+    "00D4:0x04": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123402Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 1,
+      "name": "W5 Bathroom"
+    },
+    "00D4:0x05": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123498Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 1,
+      "name": "W6 Bedroom"
+    },
+    "00D4:0x06": {
+      "version": 20,
+      "updated_at": "2026-09-05T14:20:09.123594Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 0,
+      "name": "TV"
+    },
+    "00D4:0x07": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.123666Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x08": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.123717Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x09": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.128992Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0A": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129047Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0B": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129095Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0C": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129141Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0D": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129186Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0E": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129232Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x0F": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129277Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x10": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129332Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x11": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129379Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x12": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.129424Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x13": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179049Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x14": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179110Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x15": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179158Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x16": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179205Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x17": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179251Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x18": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179297Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x19": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179351Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1A": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179398Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1B": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179443Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1C": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179489Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1D": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179535Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1E": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179580Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00D4:0x1F": {
+      "version": 5,
+      "updated_at": "2026-09-05T14:20:09.179625Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x00": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.509631Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 6,
+      "name": "W1 Kitchen"
+    },
+    "00DC:0x01": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.509731Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 7,
+      "name": "W2 Living"
+    },
+    "00DC:0x02": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.526855Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 6,
+      "name": "W3 Patio"
+    },
+    "00DC:0x03": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.526918Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 7,
+      "name": "W4 Pool"
+    },
+    "00DC:0x04": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.526978Z",
+      "present": true,
+      "device_guid": "ed6cd4b9-60a8-e845-b485-ace14f0055bc",
+      "source_index": 1,
+      "name": "W5 Bathroom"
+    },
+    "00DC:0x05": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.527036Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 1,
+      "name": "W6 Bedroom"
+    },
+    "00DC:0x06": {
+      "version": 12,
+      "updated_at": "2026-09-05T14:20:08.527093Z",
+      "present": true,
+      "device_guid": "674e1900-f8a9-f6be-a465-3d0fbee12977",
+      "source_index": 0,
+      "name": "TV"
+    },
+    "00DC:0x07": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.527124Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x08": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.527157Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x09": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539388Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0A": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539435Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0B": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539480Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0C": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539524Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0D": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539568Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0E": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539618Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x0F": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539662Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x10": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539706Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x11": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539750Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x12": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539795Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x13": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539838Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x14": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.539882Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x15": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.540811Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x16": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.541859Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x17": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.543418Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x18": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.543465Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x19": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.543498Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1A": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.546476Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1B": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.547405Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1C": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.548488Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1D": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.549378Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1E": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.592042Z",
+      "present": false,
+      "device_guid": null,
+      "source_index": null,
+      "name": null
+    },
+    "00DC:0x1F": {
+      "version": 3,
+      "updated_at": "2026-09-05T14:20:08.592093Z",
       "present": false,
       "device_guid": null,
       "source_index": null,

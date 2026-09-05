@@ -32,6 +32,9 @@ class ConnectionInterrupted:
 class BaseTransport(ABC, Generic[T]):
     host: str
 
+    def validate_send(self, *ops: T) -> None:
+        """Validate a batch without starting a connection or queueing operations."""
+
     @abstractmethod
     def send(self, *ops: T) -> None: ...
 
@@ -53,7 +56,6 @@ class TransportQueue(Generic[T]):
     def __init__(self, encoder: Encoder[Any]) -> None:
         self._queue: asyncio.Queue[tuple[T, HexBytes] | None] = asyncio.Queue()
         self._incomplete: list[tuple[T, HexBytes]] = []
-        self._queued_encoded: set[HexBytes] = set()
         self._closed = False
         self.encoder = encoder
 
@@ -77,14 +79,10 @@ class TransportQueue(Generic[T]):
             encoded = self._encode(value)
         if encoded is None:
             return
-        if encoded in self._queued_encoded:
-            return
-        self._queued_encoded.add(encoded)
         self._queue.put_nowait((value, encoded))
 
     def task_done(self) -> None:
-        _, encoded = self._incomplete.pop(0)
-        self._queued_encoded.discard(encoded)
+        self._incomplete.pop(0)
 
     async def pull(self) -> tuple[T, HexBytes]:
         if self._incomplete:
@@ -143,16 +141,27 @@ class Transport(BaseTransport[T]):
         except Exception as exc:
             logger.exception("Transport loop exited unexpectedly: %s", exc)
 
-    def send(self, *ops: T) -> None:
-        self._maybe_start_loop()
+    def validate_send(self, *ops: T) -> None:
         for op in ops:
-            self.outbound.push(op)
+            self.encoder.encode(op)
+
+    def send(self, *ops: T) -> None:
+        # Encoding may reject a later operation. Complete it before starting the
+        # loop or queueing any earlier writes from the batch.
+        encoded_ops = [(op, self.encoder.encode(op)) for op in ops]
+        self._maybe_start_loop()
+        for op, encoded in encoded_ops:
+            if encoded is not None:
+                self.outbound.push(op, encoded=encoded)
 
     async def recv(self) -> AsyncGenerator[T | ConnectionInterrupted, None]:
         self._maybe_start_loop()
+        # A receiver belongs to one connection lifecycle. Shutdown replaces the
+        # public queues, but a generator paused at yield must finish on its old
+        # queue instead of waiting forever on the new one when resumed.
+        inbound = self.inbound
         while True:
             try:
-                inbound = self.inbound
                 op, _ = await inbound.pull()
                 try:
                     yield op
@@ -165,6 +174,7 @@ class Transport(BaseTransport[T]):
 
     def shutdown(self) -> None:
         loop_task = self._loop_task
+        self._loop_task = None
         if loop_task is not None:
             loop_task.cancel()
 

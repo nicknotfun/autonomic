@@ -26,9 +26,9 @@ For this checkout, `.venv` points at `~/.venvs/default`.
 
 ## Protocol Reference
 
-[PROTOCOL.md](PROTOCOL.md) is a repository-independent description of the direct
-amplifier wire protocol: row format, command families, value encoding, source
-selector tables, and observed MA6/M6250 behavior.
+[PROTOCOL.md](PROTOCOL.md) is a concise implementation reference for the direct
+amplifier wire protocol, including row format, command patterns, value encoding,
+and source selector conventions.
 
 The implementation catalog lives in [amp/codec.py](amp/codec.py). It models rows
 as typed command objects and uses [amp/encoder.py](amp/encoder.py) to encode
@@ -76,7 +76,9 @@ asyncio.run(main())
 ```
 
 `CommandEncoder(read_only=True)` is the default, so write-like commands are filtered
-unless `read_only=False` is passed.
+unless `read_only=False` is passed. Response-only rows are also blocked from
+outbound read-only traffic; they remain decodable. Encoding rejects ambiguous
+optional-field gaps and out-of-range values before producing a wire row.
 
 Build a system snapshot:
 
@@ -106,15 +108,16 @@ performs best-effort shutdown.
 ## System State
 
 `SystemState` is the high-level view maintained by [amp/system.py](amp/system.py).
-It has four key-sorted maps:
+It has five key-sorted maps:
 
 - `state.devices`: keyed by device id (`HexBytes`).
 - `state.inputs`: keyed by `(device id, source selector)`.
 - `state.outputs`: keyed by output id.
 - `state.remote_inputs`: keyed by remote source slot id.
+- `state.remote_inputs_by_device`: keyed by `(receiving device id, remote slot id)`.
 
 The maps preserve sorted iteration, so output is stable by device id,
-`(device id, selector)`, output id, and remote slot id.
+`(device id, selector)`, output id, remote slot id, and `(device id, remote slot id)`.
 
 `DeviceState` tracks:
 
@@ -156,6 +159,12 @@ output, device, input, and remote-input state rather than copied into
 
 - slot presence, backing device GUID, backing source index, and display name
 
+`SystemState.remote_inputs_by_device[(device_id, slot_id)]` holds each receiving
+amplifier's own slot table. The legacy `remote_inputs` view exposes only
+definitions that agree across observed owners. Old JSON snapshots without owned
+tables remain readable, but once owned tables exist, routing never borrows a
+different amplifier's slot table.
+
 `SystemState.save_to_file()` and `SystemState.load_from_file()` serialize the
 in-memory view. The `System` client adds configuration backup and hardware
 restore methods:
@@ -173,7 +182,9 @@ async with System(
     await system.restore_state("state.json")
 ```
 
-`restore_state()` validates device and output ownership before sending anything.
+`restore_state()` validates device and output ownership and encodes the entire
+write plan before sending anything. Validation failures leave all send queues
+untouched; transport failures during execution cannot roll back device writes.
 It restores the tracked writable configuration: source names with their exact
 option bytes, output names, and maximum volumes. It never writes device identity
 or GUID fields, and it does not replay saved power, volume, mute, or selected
@@ -183,8 +194,8 @@ volume to `0.5`, then unmutes it; power is left unchanged.
 There is no documented no-source selector: an omitted source is a query and
 `00` is a real local input. Restore therefore leaves the selected source
 unchanged. Distributed-source definitions remain in the JSON for reference but
-are not written because the current state model does not retain per-device slot
-ownership. Other codec-level settings not tracked by `SystemState` are likewise
+are deliberately outside the restore whitelist, even when per-device ownership
+is known. Other codec-level settings not tracked by `SystemState` are likewise
 outside this restore operation.
 
 ## Discovery
@@ -207,11 +218,17 @@ Output discovery creates output state from discovered device output lists, asks
 for names, and refreshes dynamic output status: power, mute, source, volume, and
 maximum volume.
 
-Remote source discovery queries slots `00` through `1F`.
+Remote source discovery freshly queries slots `00` through `1F` on each
+amplifier and waits for every receiving device's table. Multi-device discovery
+requires known transport ownership before these unaddressed replies can be
+attributed safely.
 
 When a TCP transport detects a dropped established connection it emits a local
 `ConnectionInterrupted` event. `System` handles that by queuing read-only refresh
-queries so dynamic state is repopulated after reconnect.
+queries for dynamic state, zone/source names, and distributed definitions after
+reconnect. Cached routes on that transport are invalidated until fresh replies
+arrive. Transport queues preserve repeated commands and state transitions in
+order, including repeated incremental volume operations.
 
 ## Selectors
 
@@ -229,7 +246,8 @@ system.all_outputs().set_input(system.input_by_name("W1"))
 populating that set.
 `OutputSelector.set_input()` resolves the source command for each target output:
 same-device inputs use the local selector, while cross-device inputs require a
-matching distributed source slot and raise `ValueError` when no route is known.
+matching distributed source slot on the destination amplifier and raise
+`ValueError` when no route is known.
 
 `system.all_inputs()` returns non-remote `InputSelector` objects in physical
 source order by default. `system.input_by_name()` uses the same filtered view.
@@ -272,6 +290,9 @@ Example scripts live under [examples/](examples):
 - `add_eaudiocast_sources.py`: define remote source slots.
 
 Write examples construct `System(..., read_only=False)`.
+They abort on incomplete discovery and validate the whole write plan before
+sending it. The eAudioCast example requires every target to resolve explicitly;
+an unknown target never falls back to the primary amplifier.
 
 ## Layout
 

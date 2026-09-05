@@ -5,6 +5,7 @@ Exists just to make codec.py much cleaner as a description of the protocol.
 
 from abc import ABC, abstractmethod
 import logging
+import math
 import re
 from typing import Any, Generic, TypeVar
 from uuid import UUID
@@ -207,6 +208,8 @@ class FloatParseStep(MessageParseStep[float]):
 
     def consume(self, input: HexBytes) -> tuple[float, int]:
         int_value, consumed = self.int_parse_step.consume(input)
+        if int_value > self.int_max:
+            raise ValueError(f"encoded float value {int_value} is out of range [0, {self.int_max}]")
         value = self.min_value + (self.max_value - self.min_value) * int_value / self.int_max
         return value, consumed
 
@@ -215,7 +218,7 @@ class FloatParseStep(MessageParseStep[float]):
             value = float(value)
         if not isinstance(value, float):
             raise ValueError(f"expected float value but got {value!r}")
-        if value < self.min_value or value > self.max_value:
+        if not math.isfinite(value) or value < self.min_value or value > self.max_value:
             raise ValueError(
                 f"float value {value} is out of range [{self.min_value}, {self.max_value}]"
             )
@@ -275,6 +278,10 @@ class RepeatParseStep(MessageParseStep[tuple[T, ...]]):
     def emit(self, values: tuple[T, ...]) -> HexBytes:
         if not isinstance(values, tuple):
             raise ValueError(f"expected tuple value but got {values!r}")
+        if len(values) < self.min_repeats:
+            raise ValueError(
+                f"expected at least {self.min_repeats} repetitions but got {len(values)}"
+            )
         chunks: list[HexBytes] = []
         for value in values:
             chunks.append(self.sub_pattern.emit(value))
@@ -426,6 +433,20 @@ class MessagePattern:
         for field_name, step in self.steps:
             value = getattr(message, field_name) if field_name is not None else None
             chunks.append(step.emit(value))
+        for index, (field_name, step) in enumerate(self.steps):
+            if not isinstance(step, OptionalParseStep) or chunks[index]:
+                continue
+            remaining = HexBytes(b"".join(chunks[index + 1 :]))
+            if not remaining:
+                continue
+            # A missing positional field normally shifts later fields into its place.
+            # The optional length-prefixed hidden name is distinguishable from a
+            # plain UTF-8 name when its prefix cannot describe the remaining bytes.
+            if isinstance(step.sub_pattern, StringParseStep) and step.sub_pattern.has_length_prefix:
+                _, consumed = step.consume(remaining)
+                if consumed == 0:
+                    continue
+            raise ValueError(f"field {field_name!r} is required before later fields")
         return HexBytes(b"".join(chunks))
 
 

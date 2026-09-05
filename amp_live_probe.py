@@ -14,8 +14,8 @@ artifact that is useful for answering three practical questions:
 The default mode is read-only. Use `--write-noops` to include the write phase
 that re-sends only values already observed from the amplifiers. Rename writes,
 identity writes, remote-source configuration writes, link writes, source
-metadata writes, relative volume commands, and full input-gain writes are always
-skipped.
+metadata writes, arbitrary-storage deletion, relative volume commands, and full
+input-gain writes are always skipped.
 """
 
 import argparse
@@ -43,7 +43,7 @@ from amp.toggle_bool import ToggleBool
 
 # These defaults match the current local stack documented in PROTOCOL.md. Pass
 # --host explicitly when probing another installation.
-DEFAULT_HOSTS = ("10.1.0.109", "10.1.0.200")
+DEFAULT_HOSTS = ("10.1.0.200", "10.1.0.201")
 REMOTE_SLOTS = tuple(range(0x20))
 
 
@@ -125,16 +125,21 @@ class RawSocketProbe:
     This class therefore uses the same `CommandEncoder` but owns the socket loop.
     """
 
-    def __init__(self, host: str, *, port: int, send_gap: float, idle_wait: float) -> None:
+    def __init__(
+        self,
+        host: str,
+        *,
+        port: int,
+        send_gap: float,
+        idle_wait: float,
+        write_noops: bool = False,
+    ) -> None:
         self.host = host
         self.port = port
         self.send_gap = send_gap
         self.idle_wait = idle_wait
-
-        # read_only=False is used only so the encoder can serialize write-shaped
-        # ops during optional no-op write tests. The script controls whether
-        # those writes are sent with `--write-noops`.
-        self.encoder = CommandEncoder(read_only=False)
+        self.write_noops = write_noops
+        self.encoder = CommandEncoder(read_only=True)
 
         self.probe = HostProbe(host=host)
         self._ops: list[Command] = []
@@ -216,12 +221,40 @@ class RawSocketProbe:
 
         await asyncio.sleep(self.idle_wait if wait is None else wait)
 
-    async def send_ops(self, phase: str, ops: Iterable[Command]) -> None:
+    async def send_ops(
+        self, phase: str, ops: Iterable[Command], *, write_noops: bool = False
+    ) -> None:
         """Encode and send a phase of rows, retaining every outbound row."""
 
+        if write_noops and not self.write_noops:
+            raise ValueError("current-value writes require --write-noops")
+        encoder = CommandEncoder(read_only=False) if write_noops else self.encoder
         assert self._writer is not None
         for op in ops:
-            encoded = self.encoder.encode(op)
+            if write_noops and not isinstance(
+                op,
+                (
+                    codec.StandbyPowerCommand,
+                    codec.MuteCommand,
+                    codec.SourceSelectionCommand,
+                    codec.VolumeCommand,
+                    codec.MaximumVolumeCommand,
+                    codec.BassCommand,
+                    codec.TrebleCommand,
+                    codec.BalanceCommand,
+                    codec.AmplifierSpecialFeaturesCommand,
+                    codec.AudioDelayCommand,
+                    codec.ZoneGainCommand,
+                ),
+            ):
+                raise ValueError(f"not an allowed current-value output write: {op!r}")
+            if (
+                isinstance(op, codec.StandbyPowerCommand) and op.is_on is ToggleBool.Toggle
+            ) or (
+                isinstance(op, codec.MuteCommand) and op.is_muted is ToggleBool.Toggle
+            ):
+                raise ValueError("toggle operations cannot be current-value writes")
+            encoded = encoder.encode(op)
             if encoded is None:
                 self.probe.errors.append(f"{phase}: encoder filtered {op!r}")
                 continue
@@ -330,6 +363,7 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         port=args.port,
         send_gap=args.send_gap,
         idle_wait=args.idle_wait,
+        write_noops=args.write_noops,
     ) as probe:
         # Phase 1: cheap broad discovery. These rows establish device ids,
         # output ids, remote slot data, and current dynamic output status.
@@ -437,9 +471,8 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
             ),
         )
 
-        # Phase 6: remote slots and preset groups. Remote source info/delete rows
-        # are write-shaped in the codec when they carry payloads, but the rows
-        # sent here are discovery queries only.
+        # Phase 6: remote slots and stored data. High-bit storage IDs are deletion
+        # commands even without payloads, so only ordinary read IDs belong here.
         await probe.send_ops(
             "remote_and_preset_reads",
             unique_ops(
@@ -447,7 +480,6 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                     codec.DistributedSourceDefinitionRequestCommand(),
                     *[codec.DistributedSourceDefinitionRequestCommand(slot_id=slot) for slot in REMOTE_SLOTS],
                     *[codec.ArbitraryDataStorageCommand(slot_id=slot) for slot in range(16)],
-                    *[codec.ArbitraryDataStorageCommand(slot_id=0x8000 + slot) for slot in range(16)],
                 ]
             ),
         )
@@ -459,10 +491,10 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
         current_ops = list(probe.ops)
         no_op_writes: list[Command] = []
         for output, op in first_by_output(current_ops, codec.StandbyPowerCommand).items():
-            if isinstance(op, codec.StandbyPowerCommand) and op.is_on is not None:
+            if isinstance(op, codec.StandbyPowerCommand) and op.is_on in (ToggleBool.On, ToggleBool.Off):
                 no_op_writes.append(codec.StandbyPowerCommand(output=output, is_on=op.is_on))
         for output, op in first_by_output(current_ops, codec.MuteCommand).items():
-            if isinstance(op, codec.MuteCommand) and op.is_muted is not None:
+            if isinstance(op, codec.MuteCommand) and op.is_muted in (ToggleBool.On, ToggleBool.Off):
                 no_op_writes.append(codec.MuteCommand(output=output, is_muted=op.is_muted))
         for output, op in first_by_output(current_ops, codec.SourceSelectionCommand).items():
             if isinstance(op, codec.SourceSelectionCommand) and op.source is not None:
@@ -493,7 +525,9 @@ async def run_raw_host(host: str, args: argparse.Namespace) -> tuple[HostProbe, 
                 no_op_writes.append(codec.ZoneGainCommand(output=output, gain=op.gain))
 
         if args.write_noops:
-            await probe.send_ops("no_op_setting_writes", unique_ops(no_op_writes))
+            await probe.send_ops(
+                "no_op_setting_writes", unique_ops(no_op_writes), write_noops=True
+            )
             await probe.send_ops(
                 "post_write_refresh",
                 unique_ops(
@@ -768,6 +802,7 @@ async def async_main() -> None:
             "SourceSpecificMetadataCommand writes",
             "VolumeUpCommand/VolumeDownCommand transient relative volume commands",
             "SourceGainCommand full-table writes",
+            "ArbitraryDataStorageCommand high-bit slot deletion writes",
         ],
     }
     Path(args.output).write_text(json.dumps(result, indent=2, sort_keys=True, default=json_default))

@@ -1957,13 +1957,27 @@ def test_discover_devices_continues_when_only_host_ownership_is_missing() -> Non
         device_201.mac = HexBytes("ACE14F006012")
         system = System((transport_200, transport_201), state=state)
         try:
+            async def reply_with_owners() -> None:
+                while not transport_200.sent or not transport_201.sent:
+                    await asyncio.sleep(0)
+                transport_200.push(RequestZoneAssignmentsCommandResponse(
+                    device_id=device_200.id, zones=(1, 2)
+                ))
+                transport_201.push(RequestZoneAssignmentsCommandResponse(
+                    device_id=device_201.id, zones=(9, 10)
+                ))
+
+            reply_task = asyncio.create_task(reply_with_owners())
             await asyncio.wait_for(
                 system.discover_devices(target_devices=2, time_between_probes_secs=0),
                 timeout=1,
             )
+            await reply_task
 
             assert state.devices[HexBytes("00D4")].needed_update_ops() == []
             assert state.devices[HexBytes("6012")].needed_update_ops() == []
+            assert device_200.host == transport_200.host
+            assert device_201.host == transport_201.host
             assert any(
                 RequestZoneAssignmentsCommand() in batch for batch in transport_200.sent
             )
